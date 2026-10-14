@@ -2,121 +2,268 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
   <title>筋トレ記録</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header>
     <h1>筋トレ記録</h1>
-    <input type="date" id="date">
+    <div class="datenav">
+      <button type="button" id="prev-day" aria-label="前の日">‹</button>
+      <input type="date" id="date">
+      <button type="button" id="next-day" aria-label="次の日">›</button>
+    </div>
   </header>
-
-  <nav>
-    <button data-tab="workout" class="active">トレーニング</button>
-    <button data-tab="meal">食事</button>
-    <button data-tab="body">体組成</button>
-    <button data-tab="analysis">分析</button>
-    <button data-tab="stats">履歴・設定</button>
-  </nav>
 
   <main>
     <!-- トレーニング -->
     <section id="tab-workout">
       <div class="cards" id="volume-cards"></div>
-      <form id="workout-form">
-        <select id="w-part"></select>
-        <input id="w-exercise" list="exercise-list" placeholder="種目名" required>
-        <datalist id="exercise-list"></datalist>
-        <input id="w-weight" type="number" step="0.5" min="0" placeholder="重量(kg)" required>
-        <input id="w-reps" type="number" min="1" placeholder="回数" required>
-        <input id="w-sets" type="number" min="1" value="1" placeholder="セット数" required>
-        <button type="submit">追加</button>
-      </form>
-      <p id="rm-preview" class="hint"></p>
+
+      <div class="panel">
+        <h3>今週の負荷量 <small>日別</small></h3>
+        <canvas id="week-chart" class="chart short"></canvas>
+      </div>
+
+      <div class="panel">
+        <h3>種目を追加</h3>
+        <form id="workout-form" class="grid2">
+          <label class="f">部位<select id="w-part"></select></label>
+          <label class="f">種目<input id="w-exercise" list="exercise-list" placeholder="例: ベンチプレス" required></label>
+          <datalist id="exercise-list"></datalist>
+          <label class="f">重量 (kg)<input id="w-weight" type="number" inputmode="decimal" step="0.5" min="0" required></label>
+          <label class="f">回数<input id="w-reps" type="number" inputmode="numeric" min="1" required></label>
+          <label class="f">セット数<input id="w-sets" type="number" inputmode="numeric" min="1" value="1" required></label>
+          <div class="f preview" id="rm-preview">推定1RM —</div>
+          <button type="submit" class="full">追加する</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>おすすめ <small>スタイルと記録から提案</small></h3>
+        <p id="rec-plan" class="plan"></p>
+        <button type="button" id="ai-rec" class="secondary block">✨ AIで今日のメニューを作る</button>
+        <div id="ai-rec-out"></div>
+        <h4>次にやる種目</h4>
+        <ul id="rec-next" class="list"></ul>
+        <h4>今日の種目の次回の目安</h4>
+        <ul id="rec-target" class="list"></ul>
+      </div>
+
+      <details class="panel manage">
+        <summary>種目を登録・管理</summary>
+        <form id="ex-form" class="grid2">
+          <label class="f">部位<select id="ex-part"></select></label>
+          <label class="f">新しい種目名<input id="ex-name" placeholder="例: チェストプレス" required></label>
+          <button type="submit" class="full">種目リストに登録</button>
+        </form>
+        <p class="hint">登録した種目は上の「種目」欄の候補に出ます。記録した種目も自動で候補に加わります。</p>
+        <ul id="ex-list" class="list"></ul>
+      </details>
+
+      <h3 class="sec">この日の記録</h3>
       <ul id="workout-list" class="list"></ul>
       <p id="workout-summary" class="summary"></p>
-      <button id="save-image" class="secondary">この日の記録を画像で保存</button>
+      <button id="save-image" class="secondary block">この日の記録を画像で保存</button>
     </section>
 
     <!-- 食事 -->
     <section id="tab-meal" hidden>
-      <form id="meal-form">
-        <select id="m-type">
-          <option>朝食</option><option>昼食</option><option>夕食</option><option>間食</option><option>プロテイン</option>
-        </select>
-        <input id="m-name" list="food-list" placeholder="食品名" required>
-        <datalist id="food-list"></datalist>
-        <input id="m-kcal" type="number" min="0" placeholder="kcal" required>
-        <input id="m-p" type="number" step="0.1" min="0" placeholder="P(g)" value="0">
-        <input id="m-f" type="number" step="0.1" min="0" placeholder="F(g)" value="0">
-        <input id="m-c" type="number" step="0.1" min="0" placeholder="C(g)" value="0">
-        <button type="submit">追加</button>
-      </form>
+      <div class="panel meal-top">
+        <canvas id="meal-ring" class="ring"></canvas>
+        <div id="macro-list" class="macros"></div>
+      </div>
+
+      <div class="panel">
+        <h3>写真から自動計算 <small>AI</small></h3>
+        <label class="file block">📷 食事を撮影 / 写真を選択<input type="file" id="ai-photo" accept="image/*" capture="environment" hidden></label>
+        <div class="grid2">
+          <label class="f">大きさの基準物
+            <select id="ai-ref">
+              <option value="">自動(皿・箸などから推定)</option>
+              <option value="直径約26cmの標準的な夕食皿">夕食皿 (約26cm)</option>
+              <option value="箸(長さ約23cm)">箸 (約23cm)</option>
+              <option value="350ml缶(直径6.6cm・高さ12.2cm)">350ml缶</option>
+              <option value="500mlペットボトル(高さ約20.5cm)">500mlペットボトル</option>
+              <option value="クレジットカード(8.56×5.40cm)">カード (8.6×5.4cm)</option>
+            </select>
+          </label>
+          <label class="f">補足 <input id="ai-note" placeholder="例: ご飯は大盛り"></label>
+        </div>
+        <p class="hint">基準物を一緒に写すと量の誤差が小さくなります。真上〜斜め45°から、全体が入るように撮影してください。</p>
+        <div id="ai-result"></div>
+      </div>
+
+      <div class="panel">
+        <h3>食事を追加</h3>
+        <form id="meal-form" class="grid2">
+          <label class="f">区分
+            <select id="m-type"><option>朝食</option><option>昼食</option><option>夕食</option><option>間食</option><option>プロテイン</option></select>
+          </label>
+          <label class="f">食品<input id="m-name" list="food-list" placeholder="選ぶと自動入力" required></label>
+          <datalist id="food-list"></datalist>
+          <label class="f">kcal<input id="m-kcal" type="number" inputmode="decimal" min="0" required></label>
+          <label class="f">P (g)<input id="m-p" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <label class="f">F (g)<input id="m-f" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <label class="f">C (g)<input id="m-c" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <button type="submit" class="full">追加する</button>
+        </form>
+      </div>
+
+      <h3 class="sec">この日の食事</h3>
       <ul id="meal-list" class="list"></ul>
-      <p id="meal-summary" class="summary"></p>
     </section>
 
     <!-- 体組成 -->
     <section id="tab-body" hidden>
-      <div class="row">
-        <label>身長(cm) <input id="b-height" type="number" step="0.1" min="0" placeholder="BMI計算用"></label>
-      </div>
       <div class="cards" id="body-cards"></div>
-      <form id="body-form">
-        <input id="b-weight" type="number" step="0.1" min="0" placeholder="体重(kg)" required>
-        <input id="b-fat" type="number" step="0.1" min="0" placeholder="体脂肪率(%)">
-        <input id="b-muscle" type="number" step="0.1" min="0" placeholder="筋肉量(kg)">
-        <button type="submit">記録</button>
-      </form>
-      <select id="body-metric"></select>
-      <canvas id="body-chart" width="640" height="240"></canvas>
+
+      <div class="panel">
+        <h3>推移</h3>
+        <select id="body-metric" class="block"></select>
+        <canvas id="body-chart" class="chart"></canvas>
+      </div>
+
+      <div class="panel">
+        <h3>体組成を記録</h3>
+        <form id="body-form" class="grid2">
+          <label class="f full">体重 (kg)<input id="b-weight" type="number" inputmode="decimal" step="0.1" min="0" required></label>
+          <label class="f">体脂肪率 (%)<input id="b-fat" type="number" inputmode="decimal" step="0.1" min="0"></label>
+          <label class="f">筋肉量 (kg)<input id="b-muscle" type="number" inputmode="decimal" step="0.1" min="0"></label>
+          <button type="submit" class="full">記録する</button>
+        </form>
+        <label class="f height">身長 (cm) <small>BMI計算用</small><input id="b-height" type="number" inputmode="decimal" step="0.1" min="0"></label>
+      </div>
+
+      <h3 class="sec">記録一覧</h3>
       <ul id="body-list" class="list"></ul>
     </section>
 
     <!-- 分析 -->
     <section id="tab-analysis" hidden>
-      <h2>RM換算</h2>
-      <form id="rm-form">
-        <input id="rm-weight" type="number" step="0.5" min="0" placeholder="重量(kg)">
-        <input id="rm-reps" type="number" min="1" max="30" placeholder="回数">
-      </form>
-      <div id="rm-result"></div>
+      <div class="panel">
+        <h3>RM換算 <small>Epley式</small></h3>
+        <form id="rm-form" class="grid2">
+          <label class="f">重量 (kg)<input id="rm-weight" type="number" inputmode="decimal" step="0.5" min="0"></label>
+          <label class="f">回数<input id="rm-reps" type="number" inputmode="numeric" min="1" max="30"></label>
+        </form>
+        <div id="rm-result"></div>
+      </div>
 
-      <h2>種目別分析</h2>
-      <select id="an-exercise"></select>
-      <div class="cards" id="an-cards"></div>
-      <canvas id="an-chart" width="640" height="240"></canvas>
+      <div class="panel">
+        <h3>種目別分析</h3>
+        <select id="an-exercise" class="block"></select>
+        <div class="cards" id="an-cards"></div>
+        <canvas id="an-chart" class="chart"></canvas>
+      </div>
 
-      <h2>週ごとの負荷量(直近8週)</h2>
-      <div id="weekly-bars"></div>
+      <div class="panel">
+        <h3>週ごとの負荷量 <small>直近8週</small></h3>
+        <canvas id="weekly-chart" class="chart short"></canvas>
+      </div>
 
-      <h2>部位別の負荷量(選択月)</h2>
-      <div id="part-bars"></div>
+      <div class="panel">
+        <h3>部位別の負荷量 <small>選択月</small></h3>
+        <div id="part-wrap" class="donut-wrap">
+          <canvas id="part-donut" class="donut"></canvas>
+          <div id="part-legend" class="legend"></div>
+        </div>
+      </div>
     </section>
 
     <!-- 履歴・設定 -->
     <section id="tab-stats" hidden>
-      <h2>目標(1日)</h2>
-      <form id="goal-form">
-        <input id="g-kcal" type="number" min="0" placeholder="kcal">
-        <input id="g-p" type="number" min="0" placeholder="P(g)">
-        <button type="submit">保存</button>
-      </form>
-      <div id="goal-progress"></div>
-      <h2>最近の記録</h2>
-      <div id="history"></div>
-      <h2>データ</h2>
-      <button id="export" class="secondary">JSONで書き出し</button>
-      <label class="file">読み込み<input type="file" id="import" accept="application/json" hidden></label>
-      <button id="load-demo" class="secondary">デモデータを読み込む</button>
+      <div class="panel">
+        <h3>トレーニングスタイル <small>おすすめの種目・重量に反映</small></h3>
+        <form id="style-form" class="grid2">
+          <label class="f full">分割法<select id="s-split"></select></label>
+          <label class="f">週のトレーニング回数<select id="s-days"></select></label>
+          <label class="f">経験<select id="s-level"></select></label>
+          <label class="f">目的<select id="s-goal"></select></label>
+          <label class="f">1回の時間 (分)<input id="s-minutes" type="number" inputmode="numeric" min="10" max="240" placeholder="60"></label>
+          <label class="f full">使える器具<select id="s-equip"></select></label>
+          <label class="f full">補足(怪我・苦手な種目・要望など)<input id="s-note" maxlength="200" placeholder="例: 右肩が痛いのでオーバーヘッドは避けたい"></label>
+          <button type="submit" class="full">スタイルを保存</button>
+        </form>
+        <p class="hint">分割法がわからないときは「おまかせ」のままで、頻度や目的を入れるとAIが分け方も提案します。</p>
+      </div>
+
+      <div class="panel">
+        <h3>1日の目標</h3>
+        <form id="goal-form" class="grid2">
+          <label class="f">kcal<input id="g-kcal" type="number" inputmode="numeric" min="0"></label>
+          <label class="f">タンパク質 (g)<input id="g-p" type="number" inputmode="numeric" min="0"></label>
+          <button type="submit" class="full">保存する</button>
+        </form>
+        <div class="rings">
+          <div><canvas id="ring-kcal" class="ring small"></canvas><span>カロリー</span></div>
+          <div><canvas id="ring-p" class="ring small"></canvas><span>タンパク質</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>直近14日の負荷量</h3>
+        <canvas id="days-chart" class="chart short"></canvas>
+      </div>
+
+      <h3 class="sec">最近の記録</h3>
+      <ul id="history" class="list"></ul>
+
+      <div class="panel" id="ai-settings">
+        <h3>AI食事解析 <small>Claude</small></h3>
+        <form id="ai-form" class="grid2">
+          <label class="f full">Anthropic APIキー<input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+          <label class="f full">モデル<input id="ai-model"></label>
+          <button type="submit" class="full">保存する</button>
+        </form>
+        <p id="ai-notice" class="hint" role="status"></p>
+        <p class="hint">キーはこの端末のブラウザにのみ保存され、JSON書き出しには含まれません。写真はAnthropicのAPIに送信されます。共有端末では使用しないでください。</p>
+      </div>
+
+      <div class="panel">
+        <h3>AIの学習データ <small>あなた専用</small></h3>
+        <p class="hint" id="ai-learn-count"></p>
+        <p class="hint">写真解析の結果で量(g)を直して追加すると、その補正を覚えて次回以降の推定に反映します。この端末にだけ保存されます。</p>
+        <button id="ai-learn-clear" class="secondary block">補正の履歴を消す</button>
+      </div>
+
+      <div class="panel">
+        <h3>データ</h3>
+        <button id="export" class="secondary block">JSONで書き出し</button>
+        <label class="file block">JSONを読み込み<input type="file" id="import" accept="application/json" hidden></label>
+        <button id="load-demo" class="secondary block">デモデータを読み込む</button>
+        <p id="data-notice" class="hint" role="status"></p>
+      </div>
     </section>
   </main>
+
+  <nav>
+    <button data-tab="workout" class="active">
+      <svg viewBox="0 0 24 24"><path d="M6 7v10M18 7v10M3 9.5v5M21 9.5v5M6 12h12"/></svg>トレーニング
+    </button>
+    <button data-tab="meal">
+      <svg viewBox="0 0 24 24"><path d="M4 11h16a8 8 0 0 1-16 0zM8 4c0 2 2 2 2 4M13 4c0 2 2 2 2 4"/></svg>食事
+    </button>
+    <button data-tab="body">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="3"/><path d="M6 21v-4a6 6 0 0 1 12 0v4"/></svg>体組成
+    </button>
+    <button data-tab="analysis">
+      <svg viewBox="0 0 24 24"><path d="M5 20V11M11 20V4M17 20v-7M3 20h18"/></svg>分析
+    </button>
+    <button data-tab="stats">
+      <svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>履歴・設定
+    </button>
+  </nav>
 
   <script src="js/data.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/calc.js"></script>
   <script src="js/charts.js"></script>
+  <script src="js/foodknowledge.js"></script>
+  <script src="js/foodai.js"></script>
+  <script src="js/coachai.js"></script>
   <script src="js/demo.js"></script>
   <script src="js/app.js"></script>
 </body>

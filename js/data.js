@@ -7,6 +7,7 @@ const EXERCISES = {
   腕: ["バーベルカール", "ハンマーカール", "トライセプスエクステンション", "ディップス"],
   腹: ["クランチ", "レッグレイズ", "プランク", "アブローラー"],
   有酸素: ["ランニング", "ウォーキング", "バイク"],
+  その他: [],
 };
 
 // 食品プリセット [名前, kcal, P, F, C]
@@ -20,3 +21,16 @@ const FOODS = [
   ["オートミール(40g)", 152, 5.4, 2.8, 27.6],
   ["牛乳(200ml)", 134, 6.6, 7.6, 9.6],
 ];
+
+// 分割法。groups: トレーニング日のグループ(順番は目安。実際は最も空いているグループを選ぶ)
+const SPLITS = {
+  auto: { label: "おまかせ(まだ決めていない)", groups: null },
+  full: { label: "全身法", groups: [{ name: "全身", parts: ["胸", "背中", "脚", "肩", "腕", "腹"] }] },
+  two: { label: "2分割(上半身/下半身)", groups: [{ name: "上半身", parts: ["胸", "背中", "肩", "腕"] }, { name: "下半身", parts: ["脚", "腹"] }] },
+  three: { label: "3分割(プッシュ/プル/レッグ)", groups: [{ name: "プッシュ", parts: ["胸", "肩"] }, { name: "プル", parts: ["背中", "腕"] }, { name: "レッグ", parts: ["脚", "腹"] }] },
+  four: { label: "4分割", groups: [{ name: "胸・腕", parts: ["胸", "腕"] }, { name: "背中", parts: ["背中"] }, { name: "肩・腹", parts: ["肩", "腹"] }, { name: "脚", parts: ["脚"] }] },
+  five: { label: "5分割(胸/背中/脚/肩/腕)", groups: [{ name: "胸", parts: ["胸"] }, { name: "背中", parts: ["背中"] }, { name: "脚", parts: ["脚"] }, { name: "肩", parts: ["肩"] }, { name: "腕・腹", parts: ["腕", "腹"] }] },
+};
+const LEVELS = { beginner: "初心者(〜半年)", intermediate: "中級者(半年〜2年)", advanced: "上級者(2年以上)" };
+const GOALS = { hypertrophy: "筋肥大", strength: "筋力アップ", fatloss: "減量・シェイプ", health: "健康維持" };
+const EQUIPMENT = { gym: "ジム(マシン・フリーウェイト)", home_db: "自宅(ダンベル中心)", bodyweight: "自重のみ" };
