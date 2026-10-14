@@ -37,7 +37,6 @@ function bodyDerived(b, heightCm) {
 // ---- おすすめ(漸進性過負荷・次の種目) ----
 
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
-const weightStep = (w) => (w < 20 ? 1 : 2.5);
 const snap = (v, step) => Math.max(step, Math.round(v / step) * step);
 
 // 種目ごとの記録を日付単位にまとめる(upTo 以前、重量ありのみ)
@@ -47,14 +46,84 @@ function sessionsOf(workouts, exercise, upTo) {
   return Object.keys(by).sort().map((date) => ({ date, rows: by[date] }));
 }
 
-// 次回の重量・回数・セット数の目安。記録が無ければ null
-function nextTarget(workouts, exercise, upTo, goal = null) {
+// ---- 重量の刻み・種目間の換算 ----
+// 種目の性質で次回の増量幅を変える(下半身の大種目は大きく、ダンベル・単関節は小さく)
+const LOWER_BIG = /スクワット|デッドリフト|レッグプレス|ヒップスラスト/;
+const DUMBBELL = /ダンベル|サイドレイズ|リアレイズ|ハンマーカール|フライ/;
+const MACHINE = /ケーブル|マシン|ラットプル|レッグエクステンション|レッグカール|シーテッド/;
+const COMPOUND = /ベンチ|スクワット|デッドリフト|プレス|ロウ|懸垂|ラットプル|ディップス|ヒップスラスト/;
+const isCompound = (ex) => COMPOUND.test(ex) && !/エクステンション|フライ/.test(ex);
+function weightStep(w, ex = "") {
+  if (LOWER_BIG.test(ex)) return w >= 60 ? 5 : 2.5;
+  if (DUMBBELL.test(ex)) return w < 10 ? 1 : 2;
+  if (MACHINE.test(ex)) return 2.5;
+  return w < 20 ? 1 : 2.5;
+}
+const snapStep = (ex, w) => Math.min(weightStep(w, ex), 2.5);
+
+// [種目, 基準種目, 係数]: 種目の推定1RM ≒ 基準種目の推定1RM × 係数(ダンベルは片手あたり)
+const START_PAIRS = [
+  ["インクラインプレス", "ベンチプレス", 0.8], ["ダンベルプレス", "ベンチプレス", 0.4], ["ダンベルフライ", "ベンチプレス", 0.22],
+  ["ショルダープレス", "ベンチプレス", 0.6], ["サイドレイズ", "ベンチプレス", 0.09], ["リアレイズ", "ベンチプレス", 0.08],
+  ["アップライトロウ", "ベンチプレス", 0.45], ["ベントオーバーロウ", "ベンチプレス", 0.8], ["ラットプルダウン", "ベンチプレス", 0.7],
+  ["シーテッドロウ", "ベンチプレス", 0.7], ["バーベルカール", "ベンチプレス", 0.4], ["ハンマーカール", "ベンチプレス", 0.18],
+  ["トライセプスエクステンション", "ベンチプレス", 0.3],
+  ["スクワット", "デッドリフト", 0.8], ["レッグプレス", "スクワット", 1.8], ["レッグエクステンション", "スクワット", 0.45],
+  ["レッグカール", "スクワット", 0.35],
+];
+const relatedOf = (ex) => [
+  ...START_PAIRS.filter((p) => p[0] === ex).map((p) => ({ base: p[1], k: p[2] })),
+  ...START_PAIRS.filter((p) => p[1] === ex).map((p) => ({ base: p[0], k: 1 / p[2] })),
+];
+// 体重×経験からの3大種目の初期1RM(保守的)
+const BW_RM = { ベンチプレス: [0.5, 0.9, 1.2], スクワット: [0.65, 1.2, 1.6], デッドリフト: [0.8, 1.5, 2.0] };
+const bwRM = (base, bw, level) => (BW_RM[base] ? bw * BW_RM[base][{ intermediate: 1, advanced: 2 }[level] || 0] : null);
+
+// 記録の無い種目の初回の目安。関連種目の記録 → 体重と経験 の順に推定し、10%控えめにする
+function estimateStart(workouts, exercise, upTo, goal = null, opts = {}) {
+  const reps = { strength: 5, hypertrophy: 10, fatloss: 12, health: 12 }[goal] || 10;
+  let rm = null, src = "";
+  for (const { base, k } of relatedOf(exercise)) {
+    const ss = sessionsOf(workouts, base, upTo).slice(-3);
+    if (!ss.length) continue;
+    rm = Math.max(...ss.flatMap((s) => s.rows.map((r) => est1RM(r.weight, r.reps)))) * k;
+    src = "『" + base + "』の記録";
+    break;
+  }
+  if (!rm && opts.bw) {
+    const own = bwRM(exercise, opts.bw, opts.level);
+    if (own) { rm = own; src = "体重と経験"; }
+    else for (const { base, k } of relatedOf(exercise)) {
+      const b = bwRM(base, opts.bw, opts.level);
+      if (b) { rm = b * k; src = "体重と経験"; break; }
+    }
+  }
+  if (!rm) return null;
+  const w = snap(weightAtReps(rm, reps) * 0.9, snapStep(exercise, weightAtReps(rm, reps)));
+  return { weight: w, reps, sets: 3, estimated: true, reason: "初回の目安(" + src + "から推定。軽めから始めて調整)" };
+}
+
+// 過去の提案に対する結果。新しい順に "hit"(達成)/"missed"(届かず)/"changed"(別の重量で実施)。実施が無い日は除く
+function recOutcomes(workouts, recLog, exercise) {
+  const byDate = {};
+  recLog.filter((r) => r.exercise === exercise).forEach((r) => (byDate[r.date] = r));
+  return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3).map((r) => {
+    const rows = workouts.filter((w) => w.exercise === exercise && w.date === r.date && w.weight > 0);
+    if (!rows.length) return null;
+    const top = rows.reduce((a, b) => (est1RM(b.weight, b.reps) > est1RM(a.weight, a.reps) ? b : a));
+    if (top.weight >= r.weight * 0.98) return top.reps >= r.reps - 1 ? "hit" : top.reps <= r.reps - 2 ? "missed" : "hit";
+    return "changed";
+  }).filter(Boolean);
+}
+
+// 次回の重量・回数・セット数の目安。opts: { outcomes(過去の提案結果), bw(体重), level }
+function nextTarget(workouts, exercise, upTo, goal = null, opts = {}) {
   const ss = sessionsOf(workouts, exercise, upTo);
-  if (!ss.length) return null;
+  if (!ss.length) return estimateStart(workouts, exercise, upTo, goal, opts);
   const last = ss[ss.length - 1];
   const top = last.rows.reduce((a, b) => (est1RM(b.weight, b.reps) > est1RM(a.weight, a.reps) ? b : a));
   const sets = Math.min(5, Math.max(2, sum(last.rows, (r) => r.sets)));
-  const step = weightStep(top.weight);
+  const step = weightStep(top.weight, exercise);
   let ceil = top.reps <= 6 ? 6 : top.reps <= 12 ? 12 : 15;
   let floor = { 6: 4, 12: 8, 15: 12 }[ceil];
   // 目的で回数帯を寄せる: 筋力は低め、減量・健康維持は高め
@@ -64,10 +133,18 @@ function nextTarget(workouts, exercise, upTo, goal = null) {
 
   const bests = ss.map((s) => Math.max(...s.rows.map((r) => est1RM(r.weight, r.reps))));
   const stagnant = ss.length >= 4 && Math.max(...bests.slice(-3)) <= Math.max(...bests.slice(0, -3)) * 1.005;
+  const dropped = ss.length >= 2 && bests[bests.length - 1] < bests[bests.length - 2] * 0.93; // 前回より明らかに落ちた
   const gap = daysBetween(last.date, upTo);
+  const outs = opts.outcomes || [];
+  const missedTwice = outs[0] === "missed" && outs[1] === "missed";
+  const dl = (f) => snap(top.weight * f, snapStep(exercise, top.weight));
 
-  if (gap >= 14) return { weight: snap(top.weight * 0.9, 0.5), reps: top.reps, sets, reason: `${prevTxt}から${gap}日空いたので、10%軽くして再開` };
-  if (stagnant) return { weight: snap(top.weight * 0.9, 0.5), reps: top.reps + 2, sets, reason: `直近3回は自己ベスト更新なし。10%軽くして回数を増やし、立て直し` };
+  if (gap >= 14) return { weight: dl(0.9), reps: top.reps, sets, reason: `${prevTxt}から${gap}日空いたので、10%軽くして再開` };
+  if (missedTwice) return { weight: dl(0.92), reps: Math.max(floor, top.reps), sets, reason: "提案に2回続けて届かなかったので、8%軽くして立て直し" };
+  if (stagnant) return { weight: dl(0.9), reps: top.reps + 2, sets, reason: "直近3回は自己ベスト更新なし。10%軽くして回数を増やし、立て直し" };
+  if ((dropped && top.reps < ceil) || outs[0] === "missed") {
+    return { weight: top.weight, reps: Math.max(floor, top.reps), sets, reason: dropped ? `${prevTxt}は前々回より落ちたので、同じ重量で回復を優先` : `前回の提案に届かなかったので、同じ重量(${top.weight}kg)で再挑戦` };
+  }
   if (top.reps >= ceil) return { weight: top.weight + step, reps: floor, sets, reason: `${prevTxt}で${ceil}回に到達 → 重量アップ(+${step}kg)` };
   return { weight: top.weight, reps: top.reps + 1, sets, reason: `${prevTxt} → 同じ重量であと1回(${ceil}回で重量アップ)` };
 }
@@ -85,7 +162,8 @@ function todayGroup(split, workouts, d) {
 }
 
 // 次にやる種目の候補(最大3件)。catalog: { 部位: [種目名...] }(先頭ほど優先)。split があれば今日のグループの部位に絞る
-function recommendNext(workouts, d, catalog, split = null, goal = null) {
+function recommendNext(workouts, d, catalog, split = null, goal = null, ctx = {}) {
+  const tOpts = (ex) => ({ bw: ctx.bw, level: ctx.level, outcomes: ctx.outcomesOf ? ctx.outcomesOf(ex) : [] });
   const todayRows = workouts.filter((w) => w.date === d);
   const done = new Set(todayRows.map((w) => w.exercise));
   const history = workouts.filter((w) => w.date < d);
@@ -100,7 +178,7 @@ function recommendNext(workouts, d, catalog, split = null, goal = null) {
   const add = (exercise, reason) => {
     if (!exercise || done.has(exercise) || out.some((o) => o.exercise === exercise) || out.length >= 3) return;
     if (tg && !tg.group.parts.includes(partOf[exercise] || "その他")) return; // 分割法の対象外の部位は出さない
-    out.push({ exercise, part: partOf[exercise] || "その他", reason, target: nextTarget(workouts, exercise, d, goal) });
+    out.push({ exercise, part: partOf[exercise] || "その他", reason, target: nextTarget(workouts, exercise, d, goal, tOpts(exercise)) });
   };
 
   const last = todayRows[todayRows.length - 1];
@@ -127,7 +205,7 @@ function recommendNext(workouts, d, catalog, split = null, goal = null) {
 
   const lastDay = {};
   workouts.filter((w) => w.date <= d && w.weight > 0).forEach((w) => (lastDay[w.part] = w.date > (lastDay[w.part] || "") ? w.date : lastDay[w.part]));
-  const pick = (p) => (catalog[p] || []).filter((e) => !done.has(e)).sort((a, b) => (freq[b] || 0) - (freq[a] || 0));
+  const pick = (p) => (catalog[p] || []).filter((e) => !done.has(e)).sort((a, b) => isCompound(b) - isCompound(a) || (freq[b] || 0) - (freq[a] || 0)); // 大種目(多関節)を先に
 
   if (tg) {
     // 3a. 分割法の「今日のグループ」の部位を、空いている順に1種目ずつ → 残りを追加

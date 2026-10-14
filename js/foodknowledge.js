@@ -47,11 +47,15 @@ const FoodPrompt = {
 5. grams_min〜grams_max は現実的な誤差範囲(±10〜30%)か。confidence が low の品目は範囲を広げる。
 6. ユーザーの過去の補正がある食品は、その傾向(多め・少なめ)を反映したか。`,
 
-  system(base, { foods = [], corrections = [] } = {}) {
+  system(base, { foods = [], corrections = [], learned = [] } = {}) {
     const parts = [base, FOOD_KNOWLEDGE, this.FEWSHOT, this.CHECKLIST];
     if (foods.length) {
       parts.push("## ユーザーが登録した食品の栄養値(同じ食品ならこの値を最優先)\n" +
         foods.map((f) => `- ${f[0]}: ${f[1]}kcal P${f[2]} F${f[3]} C${f[4]}`).join("\n"));
+    }
+    if (learned.length) {
+      parts.push("## このユーザーが過去に確認した食べ物の100gあたり栄養(同じ・近い料理ならこの値を基準にする)\n" +
+        learned.map((l) => `- ${l.name}: ${l.kcal}kcal P${l.p} F${l.f} C${l.c}(100gあたり)`).join("\n"));
     }
     if (corrections.length) {
       parts.push("## このユーザーの過去の補正(AI推定→ユーザーが直した実際の量。同じ食べ物は傾向を最優先で反映)\n" +

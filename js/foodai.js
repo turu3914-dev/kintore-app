@@ -16,8 +16,19 @@ const FoodAI = (() => {
     const cur = loadCorrections().filter((c) => !list.some((l) => l.name === c.name));
     set(CORR_STORE, JSON.stringify([...list, ...cur].slice(0, 30)));
   };
+  // 学習した食べ物: ユーザーが確認して追加した料理の100gあたり栄養を覚え、同じ料理の再解析のブレを抑える
+  const LEARN_STORE = "kintore-food-learned";
+  const loadLearned = () => { try { return JSON.parse(get(LEARN_STORE) || "[]"); } catch { return []; } };
+  const recordLearned = (items) => {
+    const fresh = items.filter((i) => i.grams >= 10 && i.name).map((i) => {
+      const k = 100 / i.grams, r = (v) => Math.round(v * k * 10) / 10;
+      return { name: i.name, kcal: Math.round(i.kcal * k), p: r(i.p), f: r(i.f), c: r(i.c) };
+    });
+    const cur = loadLearned().filter((c) => !fresh.some((l) => l.name === c.name));
+    set(LEARN_STORE, JSON.stringify([...fresh, ...cur].slice(0, 40)));
+  };
   const buildSystem = () =>
-    FoodPrompt.system(BASE_SYSTEM, { foods: typeof FOODS !== "undefined" ? FOODS : [], corrections: loadCorrections() });
+    FoodPrompt.system(BASE_SYSTEM, { foods: typeof FOODS !== "undefined" ? FOODS : [], corrections: loadCorrections(), learned: loadLearned() });
 
   const BASE_SYSTEM = `あなたは管理栄養士かつ食事画像計測の専門家です。送られた食事写真から、料理を細かく特定し、大きさ(量)を可能な限り誤差少なく推定し、栄養素を算出します。
 
@@ -149,7 +160,35 @@ const FoodAI = (() => {
     }
   }
 
-  async function analyze(file, { reference = "", note = "" } = {}) {
+  // 2回の独立した推定を平均して、1回ごとのブレを減らす
+  function mergeResults(a, b) {
+    const same = (x, y) => x === y || x.includes(y) || y.includes(x);
+    const pool = b.items.slice();
+    let disagree = false;
+    const items = a.items.map((x) => {
+      const k = pool.findIndex((y) => same(x.name, y.name));
+      if (k < 0) return { ...x, confidence: x.confidence === "high" ? "medium" : x.confidence };
+      const y = pool.splice(k, 1)[0];
+      const avg = (u, v) => (u + v) / 2;
+      const gap = Math.abs(x.grams - y.grams) / Math.max(x.grams, y.grams);
+      if (gap > 0.3) disagree = true;
+      const lo = Math.min(x.grams_min ?? x.grams, y.grams_min ?? y.grams, x.grams, y.grams);
+      const hi = Math.max(x.grams_max ?? x.grams, y.grams_max ?? y.grams, x.grams, y.grams);
+      const conf = gap > 0.3 ? "low" : gap > 0.15 && x.confidence === "high" ? "medium" : x.confidence;
+      return { ...x, grams: avg(x.grams, y.grams), kcal: avg(x.kcal, y.kcal), p: avg(x.p, y.p), f: avg(x.f, y.f), c: avg(x.c, y.c),
+        grams_min: lo, grams_max: hi, confidence: conf };
+    });
+    const notes = [a.notes, disagree ? "2回の推定で量が大きく食い違った品目があります。量を確認してください。" : ""].filter(Boolean).join(" ");
+    return { ...a, items, notes };
+  }
+
+  async function analyze(file, opts = {}) {
+    if (!opts.precise) return analyzeOnce(file, opts);
+    const [r1, r2] = await Promise.all([analyzeOnce(file, opts), analyzeOnce(file, opts)]);
+    return mergeResults(r1, r2);
+  }
+
+  async function analyzeOnce(file, { reference = "", note = "" } = {}) {
     const sample = await getSample();
     const key = get(KEY_STORE);
     if (!sample && !key) throw new Error("先に「履歴・設定」タブでAPIキーを設定してください");
@@ -203,6 +242,9 @@ const FoodAI = (() => {
     setModel: (v) => set(MODEL_STORE, v.trim() === DEFAULT_MODEL ? "" : v.trim()),
     DEFAULT_MODEL,
     recordCorrections,
+    recordLearned,
+    learnedCount: () => loadLearned().length,
+    clearLearned: () => set(LEARN_STORE, ""),
     correctionCount: () => loadCorrections().length,
     clearCorrections: () => set(CORR_STORE, ""),
     usesClaudeApp: async () => !!(await getSample()),

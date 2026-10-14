@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="筋トレ">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>筋トレ記録</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -92,18 +99,27 @@
           </label>
           <label class="f">補足 <input id="ai-note" placeholder="例: ご飯は大盛り"></label>
         </div>
+        <label class="check"><input type="checkbox" id="ai-precise"> 高精度モード(2回解析して平均。利用枠を2倍使います)</label>
         <p class="hint">基準物を一緒に写すと量の誤差が小さくなります。真上〜斜め45°から、全体が入るように撮影してください。</p>
         <div id="ai-result"></div>
       </div>
 
       <div class="panel">
+        <h3>サプリ <small>タップで選択日の分を記録</small></h3>
+        <div id="supp-chips" class="chipbtns"></div>
+        <p id="supp-month" class="hint"></p>
+      </div>
+
+      <div class="panel">
         <h3>食事を追加</h3>
+        <div id="recent-meals" class="recent" hidden></div>
         <form id="meal-form" class="grid2">
           <label class="f">区分
-            <select id="m-type"><option>朝食</option><option>昼食</option><option>夕食</option><option>間食</option><option>プロテイン</option></select>
+            <select id="m-type"><option>朝食</option><option>昼食</option><option>夕食</option><option>間食</option><option>プロテイン</option><option>サプリ</option></select>
           </label>
           <label class="f">食品<input id="m-name" list="food-list" placeholder="選ぶと自動入力" required></label>
           <datalist id="food-list"></datalist>
+          <label class="f full" id="dose-field" hidden>用量(任意)<input id="m-dose" maxlength="30" placeholder="例: 5g / 15mg / 1粒"></label>
           <label class="f">kcal<input id="m-kcal" type="number" inputmode="decimal" min="0" required></label>
           <label class="f">P (g)<input id="m-p" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
           <label class="f">F (g)<input id="m-f" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
@@ -111,6 +127,31 @@
           <button type="submit" class="full">追加する</button>
         </form>
       </div>
+
+      <details class="panel manage" id="custom-panel">
+        <summary>食品・サプリ・区分を登録</summary>
+        <h4>よく食べる食品・飲むサプリを登録</h4>
+        <form id="cf-form" class="grid2">
+          <label class="f">種類<select id="cf-kind"><option value="food">食品</option><option value="supp">サプリ</option></select></label>
+          <label class="f">名前<input id="cf-name" maxlength="40" placeholder="例: 自家製プロテインバー" required></label>
+          <label class="f full" id="cf-dose-field" hidden>用量(任意)<input id="cf-dose" maxlength="30" placeholder="例: 5g / 1粒"></label>
+          <label class="f">kcal<input id="cf-kcal" type="number" inputmode="decimal" min="0" value="0"></label>
+          <label class="f">P (g)<input id="cf-p" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <label class="f">F (g)<input id="cf-f" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <label class="f">C (g)<input id="cf-c" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <button type="submit" class="full">登録する</button>
+        </form>
+        <p id="cf-notice" class="hint" role="status"></p>
+        <ul id="cf-list" class="list"></ul>
+
+        <h4>食事の区分を追加</h4>
+        <form id="ct-form" class="grid2">
+          <label class="f full">区分名<input id="ct-name" maxlength="12" placeholder="例: 夜食 / 運動前 / 運動後" required></label>
+          <button type="submit" class="full">区分を追加</button>
+        </form>
+        <p id="ct-notice" class="hint" role="status"></p>
+        <ul id="ct-list" class="list"></ul>
+      </details>
 
       <h3 class="sec">この日の食事</h3>
       <ul id="meal-list" class="list"></ul>
@@ -208,6 +249,13 @@
         <canvas id="days-chart" class="chart short"></canvas>
       </div>
 
+      <div class="panel">
+        <h3>直近14日の摂取 <small>kcal</small></h3>
+        <canvas id="kcal-chart" class="chart short"></canvas>
+        <h3 class="sub">タンパク質 <small>g</small></h3>
+        <canvas id="protein-chart" class="chart short"></canvas>
+      </div>
+
       <h3 class="sec">最近の記録</h3>
       <ul id="history" class="list"></ul>
 
@@ -227,6 +275,12 @@
         <p class="hint" id="ai-learn-count"></p>
         <p class="hint">写真解析の結果で量(g)を直して追加すると、その補正を覚えて次回以降の推定に反映します。この端末にだけ保存されます。</p>
         <button id="ai-learn-clear" class="secondary block">補正の履歴を消す</button>
+      </div>
+
+      <div class="panel" id="install-panel" hidden>
+        <h3>アプリとして使う</h3>
+        <p id="install-msg" class="hint"></p>
+        <button type="button" id="install-btn" class="secondary block" hidden>ホーム画面に追加</button>
       </div>
 
       <div class="panel">
@@ -266,5 +320,6 @@
   <script src="js/coachai.js"></script>
   <script src="js/demo.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/pwa.js"></script>
 </body>
 </html>

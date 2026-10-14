@@ -18,7 +18,7 @@ const BODY_METRICS = {
   fatMass: { label: "体脂肪量", unit: "kg", get: (b, h) => bodyDerived(b, h).fatMass },
   lbm: { label: "除脂肪体重", unit: "kg", get: (b, h) => bodyDerived(b, h).lbm },
 };
-const MEAL_BADGE = { 朝食: "朝", 昼食: "昼", 夕食: "夕", 間食: "間", プロテイン: "P" };
+const MEAL_BADGE = { 朝食: "朝", 昼食: "昼", 夕食: "夕", 間食: "間", プロテイン: "P", サプリ: "サ" };
 
 // ---- 初期化 ----
 $("date").value = today();
@@ -57,6 +57,11 @@ $("ex-form").addEventListener("submit", (e) => {
 document.addEventListener("click", (e) => {
   const b = e.target.closest(".use");
   if (!b) return;
+  if (b.dataset.w) { // 提案を採用した記録。次回、実績と比べて提案を調整する
+    db.recLog = (db.recLog || []).filter((r) => !(r.date === curDate() && r.exercise === b.dataset.ex))
+      .concat({ date: curDate(), exercise: b.dataset.ex, weight: +b.dataset.w, reps: +b.dataset.r }).slice(-120);
+    Store.save(db);
+  }
   $("w-part").value = b.dataset.part;
   fillExerciseList();
   $("w-exercise").value = b.dataset.ex;
@@ -67,10 +72,64 @@ document.addEventListener("click", (e) => {
   $("workout-form").scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
-$("food-list").innerHTML = FOODS.map((f) => `<option value="${f[0]}">`).join("");
+// 自分で登録した食品・サプリ(先頭に並べる)とプリセット
+const MEAL_TYPES = ["朝食", "昼食", "夕食", "間食", "プロテイン", "サプリ"];
+const customOf = (kind) => (db.customFoods || []).filter((c) => c.kind === kind);
+const foodItems = () => [...customOf("food").map((c) => [c.name, c.kcal, c.p, c.f, c.c]), ...FOODS];
+const suppItems = () => [...customOf("supp").map((c) => [c.name, c.dose || "", c.kcal, c.p, c.f, c.c]), ...SUPPLEMENTS];
+
+function fillMealTypes() {
+  const sel = $("m-type"), cur = sel.value;
+  const names = [...MEAL_TYPES, ...(db.customMealTypes || []).map((t) => t.name)];
+  sel.innerHTML = names.map((n) => `<option>${esc(n)}</option>`).join("");
+  if (names.includes(cur)) sel.value = cur;
+}
+
+// 区分が「サプリ」のときは候補をサプリにし、用量欄を出す
+function fillFoodList() {
+  const supp = $("m-type").value === "サプリ";
+  $("food-list").innerHTML = (supp ? suppItems() : foodItems()).map((f) => `<option value="${esc(f[0])}">`).join("");
+  $("dose-field").hidden = !supp;
+}
+$("m-type").addEventListener("change", fillFoodList);
+fillMealTypes();
+fillFoodList();
+
+// 食品・サプリの登録
+$("cf-kind").addEventListener("change", () => { $("cf-dose-field").hidden = $("cf-kind").value !== "supp"; });
+$("cf-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const kind = $("cf-kind").value, name = $("cf-name").value.trim();
+  const exists = (kind === "supp" ? suppItems() : foodItems()).some((x) => x[0] === name);
+  if (!name || exists) { $("cf-notice").textContent = exists ? `「${name}」は登録済みです` : ""; return; }
+  const n = (id) => +$(id).value || 0;
+  (db.customFoods ||= []).push({
+    id: Store.newId(), kind, name, dose: kind === "supp" ? $("cf-dose").value.trim() : "",
+    kcal: n("cf-kcal"), p: n("cf-p"), f: n("cf-f"), c: n("cf-c"),
+  });
+  e.target.reset();
+  $("cf-dose-field").hidden = true;
+  $("cf-notice").textContent = `「${name}」を登録しました。${kind === "supp" ? "サプリのボタンと候補" : "食品の候補"}に出ます`;
+  persist();
+});
+
+// 食事の区分の追加
+$("ct-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("ct-name").value.trim();
+  const exists = [...MEAL_TYPES, ...(db.customMealTypes || []).map((t) => t.name)].includes(name);
+  if (!name || exists) { $("ct-notice").textContent = exists ? `「${name}」は既にあります` : ""; return; }
+  (db.customMealTypes ||= []).push({ id: Store.newId(), name });
+  e.target.reset();
+  $("ct-notice").textContent = `区分「${name}」を追加しました`;
+  persist();
+});
 $("m-name").addEventListener("input", () => {
-  const f = FOODS.find((x) => x[0] === $("m-name").value);
-  if (f) { $("m-kcal").value = f[1]; $("m-p").value = f[2]; $("m-f").value = f[3]; $("m-c").value = f[4]; }
+  const supp = $("m-type").value === "サプリ";
+  const f = (supp ? suppItems() : foodItems()).find((x) => x[0] === $("m-name").value);
+  if (!f) return;
+  if (supp) { $("m-dose").value = f[1]; [$("m-kcal").value, $("m-p").value, $("m-f").value, $("m-c").value] = f.slice(2); }
+  else { $("m-kcal").value = f[1]; $("m-p").value = f[2]; $("m-f").value = f[3]; $("m-c").value = f[4]; }
 });
 
 for (const [k, m] of Object.entries(BODY_METRICS)) $("body-metric").add(new Option(m.label, k));
@@ -107,9 +166,16 @@ $("style-form").addEventListener("submit", (e) => {
   persist();
 });
 
+// おすすめの調整に使う付帯情報(体重・経験・過去の提案結果)
+function tuneCtx() {
+  const b = [...db.body].sort((x, y) => y.date.localeCompare(x.date))[0];
+  return { bw: b ? b.weight : null, level: style().level, outcomesOf: (ex) => recOutcomes(db.workouts, db.recLog || [], ex) };
+}
+const tuneOpts = (ctx, ex) => ({ bw: ctx.bw, level: ctx.level, outcomes: ctx.outcomesOf(ex) });
+
 // AIに渡す材料: スタイル・今日の記録・各部位の空き日数・種目ごとの直近の記録と、ルールベースの参考値
 function coachContext(d) {
-  const st = style(), sp = split(), cat = catalog();
+  const st = style(), sp = split(), cat = catalog(), tc = tuneCtx();
   const since = {};
   Object.keys(cat).forEach((p) => {
     const last = db.workouts.filter((w) => w.part === p && w.date <= d).reduce((m, w) => (w.date > m ? w.date : m), "");
@@ -120,8 +186,9 @@ function coachContext(d) {
   const history = names.map((n) => {
     const ss = sessionsOf(db.workouts, n, d).slice(-3);
     const top = (s) => s.rows.reduce((a, b) => (est1RM(b.weight, b.reps) > est1RM(a.weight, a.reps) ? b : a));
-    const t = nextTarget(db.workouts, n, d, st.goal);
+    const t = nextTarget(db.workouts, n, d, st.goal, tuneOpts(tc, n));
     return {
+      last_rec_results: tc.outcomesOf(n),
       exercise: n, part: ss[ss.length - 1].rows[0].part, last_date: ss[ss.length - 1].date,
       recent_sessions: ss.map((s) => ({ date: s.date, top_set: `${top(s).weight}kg×${top(s).reps}回`, sets: sum(s.rows, (r) => r.sets) })),
       reference_target: t ? { weight_kg: t.weight, reps: t.reps, sets: t.sets } : null,
@@ -139,6 +206,10 @@ function coachContext(d) {
     today_done: db.workouts.filter((w) => w.date === d).map((w) => ({ exercise: w.exercise, part: w.part, weight_kg: w.weight, reps: w.reps, sets: w.sets })),
     part_days_since: since,
     history,
+    weekly_sets: Object.fromEntries(Object.keys(cat).map((p) => [p, sum(inRange(db.workouts, shiftDate(d, -6), d).filter((w) => w.part === p), (w) => w.sets)]).filter(([, n]) => n)),
+    estimated_start: Object.fromEntries(Object.values(cat).flat().filter((n) => !names.includes(n))
+      .map((n) => [n, estimateStart(db.workouts, n, d, st.goal, tc)]).filter(([, t]) => t)
+      .map(([n, t]) => [n, { weight_kg: t.weight, reps: t.reps, basis: t.reason }])),
     available_exercises: Object.fromEntries(Object.entries(cat).filter(([, l]) => l.length)),
   };
 }
@@ -152,7 +223,15 @@ $("ai-rec").addEventListener("click", async () => {
   btn.textContent = "AIが考えています…(最大1分ほど)";
   try {
     const raw = await CoachAI.plan(coachContext(d));
-    db.aiRec = { date: d, result: CoachAI.clean(raw, Object.keys(catalog())) };
+    db.aiRec = { date: d, result: CoachAI.clean(raw, Object.keys(catalog()), {
+      exclude: new Set(db.workouts.filter((w) => w.date === d).map((w) => w.exercise)),
+      guard: (n) => {
+        const ss = sessionsOf(db.workouts, n, d);
+        if (!ss.length) return null;
+        const t = ss[ss.length - 1].rows.reduce((a, c) => (c.weight > a.weight ? c : a));
+        return { weight: t.weight, step: weightStep(t.weight, n) };
+      },
+    }) };
     Store.save(db);
     renderRecommend(d);
   } catch (e) {
@@ -166,6 +245,18 @@ $("ai-rec").addEventListener("click", async () => {
 
 // 「設定する」などのリンクボタンからタブを切り替える
 document.addEventListener("click", (e) => {
+  const sp = e.target.closest("[data-supp]");
+  if (sp) {
+    const s = suppList()[+sp.dataset.supp];
+    if (s) { db.meals.push({ id: Store.newId(), date: curDate(), type: "サプリ", name: s.name, dose: s.dose, kcal: s.kcal, p: s.p, f: s.f, c: s.c }); persist(); }
+    return;
+  }
+  const r = e.target.closest("[data-recent]");
+  if (r) {
+    const m = db.meals.find((x) => x.id === r.dataset.recent);
+    if (m) { $("m-name").value = m.name; $("m-kcal").value = m.kcal; $("m-p").value = m.p; $("m-f").value = m.f; $("m-c").value = m.c; $("m-type").value = m.type; fillFoodList(); $("m-dose").value = m.dose || ""; }
+    return;
+  }
   const g = e.target.closest("[data-goto]");
   if (g) document.querySelector(`nav button[data-tab="${g.dataset.goto}"]`).click();
 });
@@ -194,8 +285,10 @@ $("meal-form").addEventListener("submit", (e) => {
   db.meals.push({
     id: Store.newId(), date: curDate(), type: $("m-type").value, name: $("m-name").value.trim(),
     kcal: +$("m-kcal").value, p: +$("m-p").value || 0, f: +$("m-f").value || 0, c: +$("m-c").value || 0,
+    ...($("m-type").value === "サプリ" && $("m-dose").value.trim() ? { dose: $("m-dose").value.trim() } : {}),
   });
   e.target.reset();
+  fillFoodList();
   persist();
 });
 
@@ -247,7 +340,7 @@ function renderAi(msg) {
     <img class="ai-photo" src="${aiMeal.preview}" alt="解析した写真">
     <p class="summary">${esc(aiMeal.meal_name || "食事")}<br>${round(t.kcal)}kcal ／ P ${round(t.p)}g F ${round(t.f)}g C ${round(t.c)}g</p>
     <ul class="list">${aiMeal.items.map((i, n) => `
-      <li class="item"><div class="body"><b>${esc(i.name)}</b>${chips([i.grams_min ? `${round(i.grams_min, 0)}〜${round(i.grams_max, 0)}g` : "", `${round(i.kcal)}kcal`, `P ${round(i.p)}g`, `F ${round(i.f)}g`, `C ${round(i.c)}g`, CONF[i.confidence]])}
+      <li class="item"><div class="body"><input data-ai-name="${n}" value="${esc(i.name)}" aria-label="料理名" maxlength="60">${chips([i.grams_min ? `${round(i.grams_min, 0)}〜${round(i.grams_max, 0)}g` : "", `${round(i.kcal)}kcal`, `P ${round(i.p)}g`, `F ${round(i.f)}g`, `C ${round(i.c)}g`, CONF[i.confidence]])}
         <p class="hint">${esc(i.size_basis || "")}</p>
         <label class="f">量 (g)<input type="number" inputmode="decimal" min="0" step="1" value="${round(i.grams)}" data-ai-grams="${n}"></label></div>
         <button class="del" data-ai-del="${n}" aria-label="除外">✕</button></li>`).join("")}</ul>
@@ -261,9 +354,9 @@ $("ai-photo").addEventListener("change", async (e) => {
   e.target.value = "";
   if (!file) return;
   aiMeal = null;
-  renderAi("解析中…(10〜20秒ほどかかります)");
+  renderAi($("ai-precise").checked ? "高精度モードで解析中…(最大1分ほどかかります)" : "解析中…(10〜20秒ほどかかります)");
   try {
-    const r = await FoodAI.analyze(file, { reference: $("ai-ref").value, note: $("ai-note").value.trim() });
+    const r = await FoodAI.analyze(file, { reference: $("ai-ref").value, note: $("ai-note").value.trim(), precise: $("ai-precise").checked });
     aiMeal = { ...r, items: r.items.map((i) => ({ ...i, base: { ...i } })) };
     if (aiMeal.items.length) renderAi();
     else renderAi(r.notes || "食事が見つかりませんでした");
@@ -273,6 +366,8 @@ $("ai-photo").addEventListener("change", async (e) => {
 });
 
 $("ai-result").addEventListener("change", (e) => {
+  const nm = e.target.dataset.aiName;
+  if (nm != null) { aiMeal.items[nm].name = e.target.value.trim() || aiMeal.items[nm].name; renderAi(); return; }
   const n = e.target.dataset.aiGrams;
   if (n == null) return;
   const i = aiMeal.items[n], b = i.base, g = Math.max(0, +e.target.value || 0);
@@ -286,6 +381,7 @@ $("ai-result").addEventListener("click", (e) => {
   if (e.target.id === "ai-add") {
     FoodAI.recordCorrections(aiMeal.items.filter((i) => i.base.grams > 0 && i.grams > 0 && Math.abs(i.grams - i.base.grams) / i.base.grams >= 0.05)
       .map((i) => ({ name: i.name, ai: Math.round(i.base.grams), actual: Math.round(i.grams) })));
+    FoodAI.recordLearned(aiMeal.items);
     for (const i of aiMeal.items) {
       db.meals.push({ id: Store.newId(), date: curDate(), type: $("m-type").value, name: i.name, kcal: round(i.kcal), p: round(i.p), f: round(i.f), c: round(i.c) });
     }
@@ -302,8 +398,8 @@ $("ai-form").addEventListener("submit", (e) => {
   FoodAI.setModel($("ai-model").value || FoodAI.DEFAULT_MODEL);
   $("ai-notice").textContent = "保存しました";
 });
-const showLearn = () => { $("ai-learn-count").textContent = `覚えた補正: ${FoodAI.correctionCount()}件`; };
-$("ai-learn-clear").addEventListener("click", () => { FoodAI.clearCorrections(); showLearn(); });
+const showLearn = () => { $("ai-learn-count").textContent = `覚えた補正: ${FoodAI.correctionCount()}件 ／ 覚えた料理: ${FoodAI.learnedCount()}件`; };
+$("ai-learn-clear").addEventListener("click", () => { FoodAI.clearCorrections(); FoodAI.clearLearned(); showLearn(); });
 showLearn();
 FoodAI.usesClaudeApp().then((ok) => { if (ok) $("ai-settings").hidden = true; }); // サブスク(アーティファクト)ではキー設定不要
 $("ai-key").value = FoodAI.getKey();
@@ -398,7 +494,7 @@ function recItem(r, withUse) {
   const btn = withUse
     ? `<button type="button" class="use" data-ex="${esc(r.exercise)}" data-part="${esc(r.part)}" data-w="${t ? t.weight : ""}" data-r="${t ? t.reps : ""}" data-s="${t ? t.sets : 3}">入力</button>`
     : "";
-  return `<li class="item"><div class="badge">${esc(r.part)}</div><div class="body"><b>${esc(r.exercise)}</b>${chips([plan, r.rest && `休憩 ${r.rest}秒`])}<span class="reason">${esc(t ? t.reason : r.reason)}</span>${t && withUse ? `<span class="reason">${esc(r.reason)}</span>` : ""}</div>${btn}</li>`;
+  return `<li class="item"><div class="badge">${esc(r.part)}</div><div class="body"><b>${esc(r.exercise)}</b>${chips([plan, r.rest && `休憩 ${r.rest}秒`, r.warmup && `W-up ${r.warmup}`])}<span class="reason">${esc(t ? t.reason : r.reason)}</span>${t && withUse ? `<span class="reason">${esc(r.reason)}</span>` : ""}</div>${btn}</li>`;
 }
 
 function renderRecommend(d) {
@@ -414,15 +510,15 @@ function renderRecommend(d) {
   $("ai-rec").textContent = ai ? "✨ AIでメニューを作り直す" : "✨ AIで今日のメニューを作る";
   $("ai-rec-out").innerHTML = ai
     ? `<div class="ai-box"><h4>✨ ${esc(ai.title || "今日のメニュー")}</h4><p>${esc(ai.reasoning)}</p><ul class="list">${ai.exercises.map((e) =>
-        recItem({ exercise: e.exercise, part: e.part, rest: e.rest, reason: "", target: { weight: e.weight, reps: e.reps, sets: e.sets, reason: e.reason } }, true)).join("")}</ul>${ai.notes ? `<p class="note">${esc(ai.notes)}</p>` : ""}</div>`
+        recItem({ exercise: e.exercise, part: e.part, rest: e.rest, warmup: e.warmup, reason: "", target: { weight: e.weight, reps: e.reps, sets: e.sets, reason: e.reason } }, true)).join("")}</ul>${ai.notes ? `<p class="note">${esc(ai.notes)}</p>` : ""}</div>`
     : "";
 
-  const next = recommendNext(db.workouts, d, cat, sp, st.goal);
+  const next = recommendNext(db.workouts, d, cat, sp, st.goal, tuneCtx());
   $("rec-next").innerHTML = next.length ? next.map((r) => recItem(r, true)).join("") : empty("記録が増えると、次の種目を提案します");
 
   const names = [...new Set(db.workouts.filter((w) => w.date === d && w.weight > 0).map((w) => w.exercise))];
   const partOf = Object.fromEntries(db.workouts.map((w) => [w.exercise, w.part]));
-  const targets = names.map((n) => ({ exercise: n, part: partOf[n], target: nextTarget(db.workouts, n, d, st.goal) })).filter((r) => r.target);
+  const targets = names.map((n) => ({ exercise: n, part: partOf[n], target: nextTarget(db.workouts, n, d, st.goal, tuneOpts(tuneCtx(), n)) })).filter((r) => r.target);
   $("rec-target").innerHTML = targets.length ? targets.map((r) => recItem(r, false)).join("") : empty("今日の種目を記録すると、次回の重量・回数を提案します");
 
   $("ex-list").innerHTML = (db.customExercises || []).length
@@ -452,6 +548,41 @@ function renderWorkout(d) {
   $("workout-summary").textContent = `この日の総負荷量: ${num(totalVolume(ws))} kg(${ws.length}件)`;
 }
 
+// 記録したことのあるサプリ(初めて記録した順。タップしても並びが動かない)+ プリセットで8件まで
+function suppList() {
+  const last = {}, cnt = {};
+  db.meals.filter((m) => m.type === "サプリ").forEach((m) => { last[m.name] = m; cnt[m.name] = 1; });
+  const out = Object.keys(cnt).map((n) => ({ name: n, dose: last[n].dose || "", kcal: last[n].kcal, p: last[n].p, f: last[n].f, c: last[n].c }));
+  suppItems().forEach(([name, dose, kcal, p, f, c]) => { if (out.length < 8 && !out.some((o) => o.name === name)) out.push({ name, dose, kcal, p, f, c }); });
+  return out.slice(0, 12);
+}
+
+// 登録した食品・サプリ・区分の管理画面
+function renderCustom() {
+  const delRow = (kind, id, badge, title, sub) =>
+    `<li class="item"><div class="badge light">${esc(badge)}</div><div class="body"><b>${esc(title)}</b>${sub}</div>${delBtn(kind, id)}</li>`;
+  const cf = db.customFoods || [];
+  $("cf-list").innerHTML = cf.length ? cf.map((c) => delRow("customFoods", c.id, c.kind === "supp" ? "サ" : "食", c.name,
+    chips([c.kind === "supp" && c.dose && esc(c.dose), c.kcal > 0 && `${c.kcal}kcal`, (c.p || c.f || c.c) && `P ${c.p}g F ${c.f}g C ${c.c}g`]))).join("")
+    : empty("登録した食品・サプリはまだありません");
+  const ct = db.customMealTypes || [];
+  $("ct-list").innerHTML = ct.length ? ct.map((t) => delRow("customMealTypes", t.id, [...t.name][0], t.name, "")).join("") : empty("追加した区分はまだありません");
+  fillMealTypes();
+  fillFoodList();
+}
+
+function renderSupplements(d) {
+  const today = db.meals.filter((m) => m.date === d && m.type === "サプリ");
+  $("supp-chips").innerHTML = suppList().map((s, i) => {
+    const n = today.filter((m) => m.name === s.name).length;
+    return `<button type="button" data-supp="${i}" class="${n ? "on" : ""}">${n ? "✓ " : ""}${esc(s.name)}${n > 1 ? ` ×${n}` : ""}<small>${esc(s.dose)}</small></button>`;
+  }).join("");
+  const days = {};
+  db.meals.filter((m) => m.type === "サプリ" && m.date.slice(0, 7) === d.slice(0, 7)).forEach((m) => (days[m.name] ||= new Set()).add(m.date));
+  const top = Object.entries(days).sort((a, b) => b[1].size - a[1].size).slice(0, 5);
+  $("supp-month").textContent = top.length ? "今月の摂取日数: " + top.map(([n, s]) => `${n} ${s.size}日`).join(" / ") : "サプリを記録すると、今月の摂取日数が表示されます";
+}
+
 function renderMeals(d) {
   const ms = db.meals.filter((m) => m.date === d);
   const kcal = sum(ms, (m) => m.kcal), P = sum(ms, (m) => m.p), F = sum(ms, (m) => m.f), C = sum(ms, (m) => m.c);
@@ -465,9 +596,19 @@ function renderMeals(d) {
     macro("P", P, P * 4, db.goal.p ? `<em> /${db.goal.p}</em>` : "") + macro("F", F, F * 9) + macro("C", C, C * 4) +
     `<span class="hint">バーはカロリー比率</span>`;
 
+  // 最近の食事: タップでフォームに入力(同じ物をよく食べる人向け)
+  const seen = new Set(), recent = [];
+  for (const m of [...db.meals].reverse()) { if (!seen.has(m.name)) { seen.add(m.name); recent.push(m); } if (recent.length >= 8) break; }
+  $("recent-meals").hidden = !recent.length;
+  $("recent-meals").innerHTML = recent.map((m) => `<button type="button" data-recent="${esc(m.id)}">${esc(m.name)}</button>`).join("");
+
+  renderSupplements(d);
+  renderCustom();
+
   $("meal-list").innerHTML = ms.length ? ms.map((m) =>
-    `<li class="item"><div class="badge light">${MEAL_BADGE[m.type] || esc(m.type)}</div><div class="body"><b>${esc(m.name)}</b>${chips([
-      `${m.kcal}kcal`, `P ${m.p}g`, `F ${m.f}g`, `C ${m.c}g`])}</div>${delBtn("meals", m.id)}</li>`).join("")
+    `<li class="item"><div class="badge light">${MEAL_BADGE[m.type] || esc([...m.type].slice(0, 2).join(""))}</div><div class="body"><b>${esc(m.name)}</b>${chips(m.type === "サプリ"
+      ? [m.dose && esc(m.dose), m.kcal > 0 && `${m.kcal}kcal`, m.p > 0 && `P ${m.p}g`]
+      : [`${m.kcal}kcal`, `P ${m.p}g`, `F ${m.f}g`, `C ${m.c}g`])}</div>${delBtn("meals", m.id)}</li>`).join("")
     : empty("この日の食事記録はありません");
 }
 
@@ -563,6 +704,9 @@ function renderStats(d) {
   drawRing($("ring-p"), db.goal.p ? p / db.goal.p : 0, db.goal.p ? Math.round((p / db.goal.p) * 100) + "%" : "—", `${round(p)}g`);
 
   const days = Array.from({ length: 14 }, (_, i) => shiftDate(d, i - 13));
+  const sumDay = (dt, k) => sum(db.meals.filter((m) => m.date === dt), (m) => m[k]);
+  drawBars($("kcal-chart"), days.map((dt) => ({ label: dt.slice(8), v: sumDay(dt, "kcal") })), { highlight: 13 });
+  drawBars($("protein-chart"), days.map((dt) => ({ label: dt.slice(8), v: sumDay(dt, "p") })), { highlight: 13 });
   drawBars($("days-chart"), days.map((dt) => ({ label: dt.slice(8), v: totalVolume(db.workouts.filter((w) => w.date === dt)) })), { highlight: 13 });
 
   const dates = [...new Set([...db.workouts, ...db.meals].map((r) => r.date))].sort().reverse().slice(0, 14);

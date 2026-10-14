@@ -12,7 +12,7 @@
 body { margin: 0; font-family: ui-sans-serif, -apple-system, "Segoe UI", "Hiragino Sans", "Meiryo", sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
 
 /* ---- ヘッダー(上部固定・日付移動) ---- */
-header { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; gap: 8px; max-width: 560px; margin: 0 auto; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: var(--bg); border-bottom: 1px solid var(--border); }
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; display: flex; justify-content: space-between; align-items: center; gap: 8px; max-width: 560px; margin: 0 auto; padding: 10px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
 h1 { font-size: 1.15rem; font-weight: 700; margin: 0; color: var(--black); white-space: nowrap; }
 .datenav { display: flex; align-items: center; gap: 4px; }
 .datenav button { width: 40px; height: 40px; padding: 0; font-size: 1.4rem; line-height: 1; background: var(--bg); color: var(--black); border: 1px solid var(--border); border-radius: 8px; }
@@ -137,6 +137,22 @@ button.linkbtn { min-height: 0; padding: 0; background: none; border: 0; color: 
 .ai-box p { margin: 0 0 10px; font-size: .82rem; }
 .ai-box .list { margin-bottom: 10px; }
 .ai-box .note { color: var(--muted); font-size: .75rem; margin: 0; }
+
+/* ---- 高精度モード・最近の食事 ---- */
+.check { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text); margin: 4px 0 8px; }
+.check input { width: 20px; min-height: 20px; height: 20px; flex: none; }
+.recent { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.recent button { min-height: 36px; padding: 4px 10px; font-size: .8rem; background: var(--hover); border: 1px solid var(--border); color: var(--black); }
+h3.sub { margin-top: 14px; }
+#ai-result input[data-ai-name] { min-height: 36px; font-weight: 700; color: var(--black); margin-bottom: 2px; }
+
+/* ---- サプリのクイック記録 ---- */
+.chipbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.chipbtns button { display: flex; flex-direction: column; align-items: flex-start; gap: 0; min-height: 44px; padding: 6px 12px; background: var(--bg); color: var(--black); border: 1px solid var(--border); border-radius: 10px; font-size: .88rem; text-align: left; }
+.chipbtns button small { color: var(--muted); font-size: .68rem; }
+.chipbtns button.on { background: var(--black); border-color: var(--black); color: #fff; }
+.chipbtns button.on small { color: #c8c8c4; }
+.chipbtns button:active { opacity: .8; }
 </style>
 
   <header>
@@ -223,18 +239,27 @@ button.linkbtn { min-height: 0; padding: 0; background: none; border: 0; color: 
           </label>
           <label class="f">補足 <input id="ai-note" placeholder="例: ご飯は大盛り"></label>
         </div>
+        <label class="check"><input type="checkbox" id="ai-precise"> 高精度モード(2回解析して平均。利用枠を2倍使います)</label>
         <p class="hint">基準物を一緒に写すと量の誤差が小さくなります。真上〜斜め45°から、全体が入るように撮影してください。</p>
         <div id="ai-result"></div>
       </div>
 
       <div class="panel">
+        <h3>サプリ <small>タップで選択日の分を記録</small></h3>
+        <div id="supp-chips" class="chipbtns"></div>
+        <p id="supp-month" class="hint"></p>
+      </div>
+
+      <div class="panel">
         <h3>食事を追加</h3>
+        <div id="recent-meals" class="recent" hidden></div>
         <form id="meal-form" class="grid2">
           <label class="f">区分
-            <select id="m-type"><option>朝食</option><option>昼食</option><option>夕食</option><option>間食</option><option>プロテイン</option></select>
+            <select id="m-type"><option>朝食</option><option>昼食</option><option>夕食</option><option>間食</option><option>プロテイン</option><option>サプリ</option></select>
           </label>
           <label class="f">食品<input id="m-name" list="food-list" placeholder="選ぶと自動入力" required></label>
           <datalist id="food-list"></datalist>
+          <label class="f full" id="dose-field" hidden>用量(任意)<input id="m-dose" maxlength="30" placeholder="例: 5g / 15mg / 1粒"></label>
           <label class="f">kcal<input id="m-kcal" type="number" inputmode="decimal" min="0" required></label>
           <label class="f">P (g)<input id="m-p" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
           <label class="f">F (g)<input id="m-f" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
@@ -242,6 +267,31 @@ button.linkbtn { min-height: 0; padding: 0; background: none; border: 0; color: 
           <button type="submit" class="full">追加する</button>
         </form>
       </div>
+
+      <details class="panel manage" id="custom-panel">
+        <summary>食品・サプリ・区分を登録</summary>
+        <h4>よく食べる食品・飲むサプリを登録</h4>
+        <form id="cf-form" class="grid2">
+          <label class="f">種類<select id="cf-kind"><option value="food">食品</option><option value="supp">サプリ</option></select></label>
+          <label class="f">名前<input id="cf-name" maxlength="40" placeholder="例: 自家製プロテインバー" required></label>
+          <label class="f full" id="cf-dose-field" hidden>用量(任意)<input id="cf-dose" maxlength="30" placeholder="例: 5g / 1粒"></label>
+          <label class="f">kcal<input id="cf-kcal" type="number" inputmode="decimal" min="0" value="0"></label>
+          <label class="f">P (g)<input id="cf-p" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <label class="f">F (g)<input id="cf-f" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <label class="f">C (g)<input id="cf-c" type="number" inputmode="decimal" step="0.1" min="0" value="0"></label>
+          <button type="submit" class="full">登録する</button>
+        </form>
+        <p id="cf-notice" class="hint" role="status"></p>
+        <ul id="cf-list" class="list"></ul>
+
+        <h4>食事の区分を追加</h4>
+        <form id="ct-form" class="grid2">
+          <label class="f full">区分名<input id="ct-name" maxlength="12" placeholder="例: 夜食 / 運動前 / 運動後" required></label>
+          <button type="submit" class="full">区分を追加</button>
+        </form>
+        <p id="ct-notice" class="hint" role="status"></p>
+        <ul id="ct-list" class="list"></ul>
+      </details>
 
       <h3 class="sec">この日の食事</h3>
       <ul id="meal-list" class="list"></ul>
@@ -339,6 +389,13 @@ button.linkbtn { min-height: 0; padding: 0; background: none; border: 0; color: 
         <canvas id="days-chart" class="chart short"></canvas>
       </div>
 
+      <div class="panel">
+        <h3>直近14日の摂取 <small>kcal</small></h3>
+        <canvas id="kcal-chart" class="chart short"></canvas>
+        <h3 class="sub">タンパク質 <small>g</small></h3>
+        <canvas id="protein-chart" class="chart short"></canvas>
+      </div>
+
       <h3 class="sec">最近の記録</h3>
       <ul id="history" class="list"></ul>
 
@@ -358,6 +415,12 @@ button.linkbtn { min-height: 0; padding: 0; background: none; border: 0; color: 
         <p class="hint" id="ai-learn-count"></p>
         <p class="hint">写真解析の結果で量(g)を直して追加すると、その補正を覚えて次回以降の推定に反映します。この端末にだけ保存されます。</p>
         <button id="ai-learn-clear" class="secondary block">補正の履歴を消す</button>
+      </div>
+
+      <div class="panel" id="install-panel" hidden>
+        <h3>アプリとして使う</h3>
+        <p id="install-msg" class="hint"></p>
+        <button type="button" id="install-btn" class="secondary block" hidden>ホーム画面に追加</button>
       </div>
 
       <div class="panel">
@@ -425,14 +488,34 @@ const SPLITS = {
 const LEVELS = { beginner: "初心者(〜半年)", intermediate: "中級者(半年〜2年)", advanced: "上級者(2年以上)" };
 const GOALS = { hypertrophy: "筋肥大", strength: "筋力アップ", fatloss: "減量・シェイプ", health: "健康維持" };
 const EQUIPMENT = { gym: "ジム(マシン・フリーウェイト)", home_db: "自宅(ダンベル中心)", bodyweight: "自重のみ" };
+
+// サプリのプリセット [名前, 用量, kcal, P, F, C]。食事の区分「サプリ」で記録する(エネルギーのあるものは摂取量にも加算)
+const SUPPLEMENTS = [
+  ["プロテイン(ホエイ1杯)", "30g", 120, 24, 1.5, 3],
+  ["クレアチン", "5g", 0, 0, 0, 0],
+  ["亜鉛", "15mg", 0, 0, 0, 0],
+  ["マルチビタミン", "1粒", 0, 0, 0, 0],
+  ["ビタミンC", "1000mg", 0, 0, 0, 0],
+  ["ビタミンD", "25μg(1000IU)", 0, 0, 0, 0],
+  ["ビタミンB群", "1粒", 0, 0, 0, 0],
+  ["マグネシウム", "100mg", 0, 0, 0, 0],
+  ["フィッシュオイル(EPA/DHA)", "1000mg", 9, 0, 1, 0],
+  ["EAA", "10g", 40, 10, 0, 0],
+  ["BCAA", "5g", 20, 5, 0, 0],
+  ["HMB", "3g", 0, 0, 0, 0],
+  ["ベータアラニン", "3g", 0, 0, 0, 0],
+  ["シトルリン", "6g", 0, 0, 0, 0],
+  ["グルタミン", "5g", 0, 0, 0, 0],
+  ["カフェイン", "200mg", 0, 0, 0, 0],
+];
 </script>
   <script>
 // localStorage への保存・読み込み。
-// データ構造: { workouts: [], meals: [], body: [], goal: {kcal, p}, profile: {height}, customExercises: [{id, part, name}] }
+// データ構造: { workouts: [], meals: [], body: [], goal: {kcal, p}, profile: {height}, customExercises: [{id, part, name}], customFoods: [{id, kind: "food"|"supp", name, dose, kcal, p, f, c}], customMealTypes: [{id, name}] }
 // 各レコードは date(YYYY-MM-DD) と id を持つ。
 const KEY = "kintore-app-v1";
 
-const emptyDb = () => ({ workouts: [], meals: [], body: [], goal: {}, profile: {}, customExercises: [] });
+const emptyDb = () => ({ workouts: [], meals: [], body: [], goal: {}, profile: {}, customExercises: [], customFoods: [], customMealTypes: [] });
 
 const Store = {
   load() {
@@ -443,7 +526,7 @@ const Store = {
     }
   },
   save(db) {
-    localStorage.setItem(KEY, JSON.stringify(db));
+    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} // 保存できない環境でも画面は動かす
   },
   newId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -505,7 +588,6 @@ function bodyDerived(b, heightCm) {
 // ---- おすすめ(漸進性過負荷・次の種目) ----
 
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
-const weightStep = (w) => (w < 20 ? 1 : 2.5);
 const snap = (v, step) => Math.max(step, Math.round(v / step) * step);
 
 // 種目ごとの記録を日付単位にまとめる(upTo 以前、重量ありのみ)
@@ -515,14 +597,84 @@ function sessionsOf(workouts, exercise, upTo) {
   return Object.keys(by).sort().map((date) => ({ date, rows: by[date] }));
 }
 
-// 次回の重量・回数・セット数の目安。記録が無ければ null
-function nextTarget(workouts, exercise, upTo, goal = null) {
+// ---- 重量の刻み・種目間の換算 ----
+// 種目の性質で次回の増量幅を変える(下半身の大種目は大きく、ダンベル・単関節は小さく)
+const LOWER_BIG = /スクワット|デッドリフト|レッグプレス|ヒップスラスト/;
+const DUMBBELL = /ダンベル|サイドレイズ|リアレイズ|ハンマーカール|フライ/;
+const MACHINE = /ケーブル|マシン|ラットプル|レッグエクステンション|レッグカール|シーテッド/;
+const COMPOUND = /ベンチ|スクワット|デッドリフト|プレス|ロウ|懸垂|ラットプル|ディップス|ヒップスラスト/;
+const isCompound = (ex) => COMPOUND.test(ex) && !/エクステンション|フライ/.test(ex);
+function weightStep(w, ex = "") {
+  if (LOWER_BIG.test(ex)) return w >= 60 ? 5 : 2.5;
+  if (DUMBBELL.test(ex)) return w < 10 ? 1 : 2;
+  if (MACHINE.test(ex)) return 2.5;
+  return w < 20 ? 1 : 2.5;
+}
+const snapStep = (ex, w) => Math.min(weightStep(w, ex), 2.5);
+
+// [種目, 基準種目, 係数]: 種目の推定1RM ≒ 基準種目の推定1RM × 係数(ダンベルは片手あたり)
+const START_PAIRS = [
+  ["インクラインプレス", "ベンチプレス", 0.8], ["ダンベルプレス", "ベンチプレス", 0.4], ["ダンベルフライ", "ベンチプレス", 0.22],
+  ["ショルダープレス", "ベンチプレス", 0.6], ["サイドレイズ", "ベンチプレス", 0.09], ["リアレイズ", "ベンチプレス", 0.08],
+  ["アップライトロウ", "ベンチプレス", 0.45], ["ベントオーバーロウ", "ベンチプレス", 0.8], ["ラットプルダウン", "ベンチプレス", 0.7],
+  ["シーテッドロウ", "ベンチプレス", 0.7], ["バーベルカール", "ベンチプレス", 0.4], ["ハンマーカール", "ベンチプレス", 0.18],
+  ["トライセプスエクステンション", "ベンチプレス", 0.3],
+  ["スクワット", "デッドリフト", 0.8], ["レッグプレス", "スクワット", 1.8], ["レッグエクステンション", "スクワット", 0.45],
+  ["レッグカール", "スクワット", 0.35],
+];
+const relatedOf = (ex) => [
+  ...START_PAIRS.filter((p) => p[0] === ex).map((p) => ({ base: p[1], k: p[2] })),
+  ...START_PAIRS.filter((p) => p[1] === ex).map((p) => ({ base: p[0], k: 1 / p[2] })),
+];
+// 体重×経験からの3大種目の初期1RM(保守的)
+const BW_RM = { ベンチプレス: [0.5, 0.9, 1.2], スクワット: [0.65, 1.2, 1.6], デッドリフト: [0.8, 1.5, 2.0] };
+const bwRM = (base, bw, level) => (BW_RM[base] ? bw * BW_RM[base][{ intermediate: 1, advanced: 2 }[level] || 0] : null);
+
+// 記録の無い種目の初回の目安。関連種目の記録 → 体重と経験 の順に推定し、10%控えめにする
+function estimateStart(workouts, exercise, upTo, goal = null, opts = {}) {
+  const reps = { strength: 5, hypertrophy: 10, fatloss: 12, health: 12 }[goal] || 10;
+  let rm = null, src = "";
+  for (const { base, k } of relatedOf(exercise)) {
+    const ss = sessionsOf(workouts, base, upTo).slice(-3);
+    if (!ss.length) continue;
+    rm = Math.max(...ss.flatMap((s) => s.rows.map((r) => est1RM(r.weight, r.reps)))) * k;
+    src = "『" + base + "』の記録";
+    break;
+  }
+  if (!rm && opts.bw) {
+    const own = bwRM(exercise, opts.bw, opts.level);
+    if (own) { rm = own; src = "体重と経験"; }
+    else for (const { base, k } of relatedOf(exercise)) {
+      const b = bwRM(base, opts.bw, opts.level);
+      if (b) { rm = b * k; src = "体重と経験"; break; }
+    }
+  }
+  if (!rm) return null;
+  const w = snap(weightAtReps(rm, reps) * 0.9, snapStep(exercise, weightAtReps(rm, reps)));
+  return { weight: w, reps, sets: 3, estimated: true, reason: "初回の目安(" + src + "から推定。軽めから始めて調整)" };
+}
+
+// 過去の提案に対する結果。新しい順に "hit"(達成)/"missed"(届かず)/"changed"(別の重量で実施)。実施が無い日は除く
+function recOutcomes(workouts, recLog, exercise) {
+  const byDate = {};
+  recLog.filter((r) => r.exercise === exercise).forEach((r) => (byDate[r.date] = r));
+  return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3).map((r) => {
+    const rows = workouts.filter((w) => w.exercise === exercise && w.date === r.date && w.weight > 0);
+    if (!rows.length) return null;
+    const top = rows.reduce((a, b) => (est1RM(b.weight, b.reps) > est1RM(a.weight, a.reps) ? b : a));
+    if (top.weight >= r.weight * 0.98) return top.reps >= r.reps - 1 ? "hit" : top.reps <= r.reps - 2 ? "missed" : "hit";
+    return "changed";
+  }).filter(Boolean);
+}
+
+// 次回の重量・回数・セット数の目安。opts: { outcomes(過去の提案結果), bw(体重), level }
+function nextTarget(workouts, exercise, upTo, goal = null, opts = {}) {
   const ss = sessionsOf(workouts, exercise, upTo);
-  if (!ss.length) return null;
+  if (!ss.length) return estimateStart(workouts, exercise, upTo, goal, opts);
   const last = ss[ss.length - 1];
   const top = last.rows.reduce((a, b) => (est1RM(b.weight, b.reps) > est1RM(a.weight, a.reps) ? b : a));
   const sets = Math.min(5, Math.max(2, sum(last.rows, (r) => r.sets)));
-  const step = weightStep(top.weight);
+  const step = weightStep(top.weight, exercise);
   let ceil = top.reps <= 6 ? 6 : top.reps <= 12 ? 12 : 15;
   let floor = { 6: 4, 12: 8, 15: 12 }[ceil];
   // 目的で回数帯を寄せる: 筋力は低め、減量・健康維持は高め
@@ -532,10 +684,18 @@ function nextTarget(workouts, exercise, upTo, goal = null) {
 
   const bests = ss.map((s) => Math.max(...s.rows.map((r) => est1RM(r.weight, r.reps))));
   const stagnant = ss.length >= 4 && Math.max(...bests.slice(-3)) <= Math.max(...bests.slice(0, -3)) * 1.005;
+  const dropped = ss.length >= 2 && bests[bests.length - 1] < bests[bests.length - 2] * 0.93; // 前回より明らかに落ちた
   const gap = daysBetween(last.date, upTo);
+  const outs = opts.outcomes || [];
+  const missedTwice = outs[0] === "missed" && outs[1] === "missed";
+  const dl = (f) => snap(top.weight * f, snapStep(exercise, top.weight));
 
-  if (gap >= 14) return { weight: snap(top.weight * 0.9, 0.5), reps: top.reps, sets, reason: `${prevTxt}から${gap}日空いたので、10%軽くして再開` };
-  if (stagnant) return { weight: snap(top.weight * 0.9, 0.5), reps: top.reps + 2, sets, reason: `直近3回は自己ベスト更新なし。10%軽くして回数を増やし、立て直し` };
+  if (gap >= 14) return { weight: dl(0.9), reps: top.reps, sets, reason: `${prevTxt}から${gap}日空いたので、10%軽くして再開` };
+  if (missedTwice) return { weight: dl(0.92), reps: Math.max(floor, top.reps), sets, reason: "提案に2回続けて届かなかったので、8%軽くして立て直し" };
+  if (stagnant) return { weight: dl(0.9), reps: top.reps + 2, sets, reason: "直近3回は自己ベスト更新なし。10%軽くして回数を増やし、立て直し" };
+  if ((dropped && top.reps < ceil) || outs[0] === "missed") {
+    return { weight: top.weight, reps: Math.max(floor, top.reps), sets, reason: dropped ? `${prevTxt}は前々回より落ちたので、同じ重量で回復を優先` : `前回の提案に届かなかったので、同じ重量(${top.weight}kg)で再挑戦` };
+  }
   if (top.reps >= ceil) return { weight: top.weight + step, reps: floor, sets, reason: `${prevTxt}で${ceil}回に到達 → 重量アップ(+${step}kg)` };
   return { weight: top.weight, reps: top.reps + 1, sets, reason: `${prevTxt} → 同じ重量であと1回(${ceil}回で重量アップ)` };
 }
@@ -553,7 +713,8 @@ function todayGroup(split, workouts, d) {
 }
 
 // 次にやる種目の候補(最大3件)。catalog: { 部位: [種目名...] }(先頭ほど優先)。split があれば今日のグループの部位に絞る
-function recommendNext(workouts, d, catalog, split = null, goal = null) {
+function recommendNext(workouts, d, catalog, split = null, goal = null, ctx = {}) {
+  const tOpts = (ex) => ({ bw: ctx.bw, level: ctx.level, outcomes: ctx.outcomesOf ? ctx.outcomesOf(ex) : [] });
   const todayRows = workouts.filter((w) => w.date === d);
   const done = new Set(todayRows.map((w) => w.exercise));
   const history = workouts.filter((w) => w.date < d);
@@ -568,7 +729,7 @@ function recommendNext(workouts, d, catalog, split = null, goal = null) {
   const add = (exercise, reason) => {
     if (!exercise || done.has(exercise) || out.some((o) => o.exercise === exercise) || out.length >= 3) return;
     if (tg && !tg.group.parts.includes(partOf[exercise] || "その他")) return; // 分割法の対象外の部位は出さない
-    out.push({ exercise, part: partOf[exercise] || "その他", reason, target: nextTarget(workouts, exercise, d, goal) });
+    out.push({ exercise, part: partOf[exercise] || "その他", reason, target: nextTarget(workouts, exercise, d, goal, tOpts(exercise)) });
   };
 
   const last = todayRows[todayRows.length - 1];
@@ -595,7 +756,7 @@ function recommendNext(workouts, d, catalog, split = null, goal = null) {
 
   const lastDay = {};
   workouts.filter((w) => w.date <= d && w.weight > 0).forEach((w) => (lastDay[w.part] = w.date > (lastDay[w.part] || "") ? w.date : lastDay[w.part]));
-  const pick = (p) => (catalog[p] || []).filter((e) => !done.has(e)).sort((a, b) => (freq[b] || 0) - (freq[a] || 0));
+  const pick = (p) => (catalog[p] || []).filter((e) => !done.has(e)).sort((a, b) => isCompound(b) - isCompound(a) || (freq[b] || 0) - (freq[a] || 0)); // 大種目(多関節)を先に
 
   if (tg) {
     // 3a. 分割法の「今日のグループ」の部位を、空いている順に1種目ずつ → 残りを追加
@@ -841,11 +1002,15 @@ const FoodPrompt = {
 5. grams_min〜grams_max は現実的な誤差範囲(±10〜30%)か。confidence が low の品目は範囲を広げる。
 6. ユーザーの過去の補正がある食品は、その傾向(多め・少なめ)を反映したか。`,
 
-  system(base, { foods = [], corrections = [] } = {}) {
+  system(base, { foods = [], corrections = [], learned = [] } = {}) {
     const parts = [base, FOOD_KNOWLEDGE, this.FEWSHOT, this.CHECKLIST];
     if (foods.length) {
       parts.push("## ユーザーが登録した食品の栄養値(同じ食品ならこの値を最優先)\n" +
         foods.map((f) => `- ${f[0]}: ${f[1]}kcal P${f[2]} F${f[3]} C${f[4]}`).join("\n"));
+    }
+    if (learned.length) {
+      parts.push("## このユーザーが過去に確認した食べ物の100gあたり栄養(同じ・近い料理ならこの値を基準にする)\n" +
+        learned.map((l) => `- ${l.name}: ${l.kcal}kcal P${l.p} F${l.f} C${l.c}(100gあたり)`).join("\n"));
     }
     if (corrections.length) {
       parts.push("## このユーザーの過去の補正(AI推定→ユーザーが直した実際の量。同じ食べ物は傾向を最優先で反映)\n" +
@@ -874,8 +1039,19 @@ const FoodAI = (() => {
     const cur = loadCorrections().filter((c) => !list.some((l) => l.name === c.name));
     set(CORR_STORE, JSON.stringify([...list, ...cur].slice(0, 30)));
   };
+  // 学習した食べ物: ユーザーが確認して追加した料理の100gあたり栄養を覚え、同じ料理の再解析のブレを抑える
+  const LEARN_STORE = "kintore-food-learned";
+  const loadLearned = () => { try { return JSON.parse(get(LEARN_STORE) || "[]"); } catch { return []; } };
+  const recordLearned = (items) => {
+    const fresh = items.filter((i) => i.grams >= 10 && i.name).map((i) => {
+      const k = 100 / i.grams, r = (v) => Math.round(v * k * 10) / 10;
+      return { name: i.name, kcal: Math.round(i.kcal * k), p: r(i.p), f: r(i.f), c: r(i.c) };
+    });
+    const cur = loadLearned().filter((c) => !fresh.some((l) => l.name === c.name));
+    set(LEARN_STORE, JSON.stringify([...fresh, ...cur].slice(0, 40)));
+  };
   const buildSystem = () =>
-    FoodPrompt.system(BASE_SYSTEM, { foods: typeof FOODS !== "undefined" ? FOODS : [], corrections: loadCorrections() });
+    FoodPrompt.system(BASE_SYSTEM, { foods: typeof FOODS !== "undefined" ? FOODS : [], corrections: loadCorrections(), learned: loadLearned() });
 
   const BASE_SYSTEM = `あなたは管理栄養士かつ食事画像計測の専門家です。送られた食事写真から、料理を細かく特定し、大きさ(量)を可能な限り誤差少なく推定し、栄養素を算出します。
 
@@ -1007,7 +1183,35 @@ const FoodAI = (() => {
     }
   }
 
-  async function analyze(file, { reference = "", note = "" } = {}) {
+  // 2回の独立した推定を平均して、1回ごとのブレを減らす
+  function mergeResults(a, b) {
+    const same = (x, y) => x === y || x.includes(y) || y.includes(x);
+    const pool = b.items.slice();
+    let disagree = false;
+    const items = a.items.map((x) => {
+      const k = pool.findIndex((y) => same(x.name, y.name));
+      if (k < 0) return { ...x, confidence: x.confidence === "high" ? "medium" : x.confidence };
+      const y = pool.splice(k, 1)[0];
+      const avg = (u, v) => (u + v) / 2;
+      const gap = Math.abs(x.grams - y.grams) / Math.max(x.grams, y.grams);
+      if (gap > 0.3) disagree = true;
+      const lo = Math.min(x.grams_min ?? x.grams, y.grams_min ?? y.grams, x.grams, y.grams);
+      const hi = Math.max(x.grams_max ?? x.grams, y.grams_max ?? y.grams, x.grams, y.grams);
+      const conf = gap > 0.3 ? "low" : gap > 0.15 && x.confidence === "high" ? "medium" : x.confidence;
+      return { ...x, grams: avg(x.grams, y.grams), kcal: avg(x.kcal, y.kcal), p: avg(x.p, y.p), f: avg(x.f, y.f), c: avg(x.c, y.c),
+        grams_min: lo, grams_max: hi, confidence: conf };
+    });
+    const notes = [a.notes, disagree ? "2回の推定で量が大きく食い違った品目があります。量を確認してください。" : ""].filter(Boolean).join(" ");
+    return { ...a, items, notes };
+  }
+
+  async function analyze(file, opts = {}) {
+    if (!opts.precise) return analyzeOnce(file, opts);
+    const [r1, r2] = await Promise.all([analyzeOnce(file, opts), analyzeOnce(file, opts)]);
+    return mergeResults(r1, r2);
+  }
+
+  async function analyzeOnce(file, { reference = "", note = "" } = {}) {
     const sample = await getSample();
     const key = get(KEY_STORE);
     if (!sample && !key) throw new Error("先に「履歴・設定」タブでAPIキーを設定してください");
@@ -1061,6 +1265,9 @@ const FoodAI = (() => {
     setModel: (v) => set(MODEL_STORE, v.trim() === DEFAULT_MODEL ? "" : v.trim()),
     DEFAULT_MODEL,
     recordCorrections,
+    recordLearned,
+    learnedCount: () => loadLearned().length,
+    clearLearned: () => set(LEARN_STORE, ""),
     correctionCount: () => loadCorrections().length,
     clearCorrections: () => set(CORR_STORE, ""),
     usesClaudeApp: async () => !!(await getSample()),
@@ -1086,8 +1293,17 @@ const CoachAI = (() => {
    - 全身法: 主要部位をバランスよく、1部位1〜2種目。
    - 2分割以上: 担当部位に集中して4〜6種目(minutes が短ければ減らす)。分割法が「おまかせ」なら、頻度と履歴から最適な分け方を選んで理由を述べる。
 2. 並び順: 多関節種目(コンパウンド)→単関節種目。
-3. 重量・回数: history に記録がある種目は、直近セッションのトップセットと reference_target を基に漸進性過負荷を行う(上限回数に達したら重量アップ[20kg未満は+1kg、以上は+2.5kg]、未達なら同重量で+1回、停滞やブランクがあれば約10%減)。記録が無い種目は body の体重などから保守的に見積もり、初回は軽めから始めると reason に書く。
-   回数帯は目的に合わせる: 筋力=3〜6回、筋肥大=6〜12回、減量/健康維持=10〜15回。初心者は控えめに。
+3. 重量・回数(最重要): 次の優先順位で決める。
+   a) history に記録がある種目: reference_target(ルールベースの次回目安)を基準にする。大きく外すときは reason に理由を書く。
+      - 二重漸進法: 回数帯の上限に全セット到達したら重量アップ、未達なら同重量で回数を増やす。
+      - 増量幅: 下半身の大種目(スクワット・デッドリフト・レッグプレス)は2.5〜5kg、上半身バーベルは2.5kg、ダンベルは片手1〜2kg、マシン・単関節は1〜2.5kg。直近トップセットから +5% を超えて上げない。
+      - last_rec_results が "missed"(前回の提案に届かなかった)なら重量を上げず、2回連続なら5〜8%下げる。"changed" は本人が別の重量を選んだので、実績を尊重する。
+      - 4回以上伸びていない、2週間以上のブランク、前回より明らかに落ちた場合は、約10%軽くして立て直す。
+   b) 記録が無い種目: estimated_start(関連種目や体重から算出した初回の目安)を使う。それも無ければ体重・経験から保守的に見積もり、初回は軽め(余力2〜3回)から始めると reason に書く。
+   c) 回数帯は目的に合わせる: 筋力=3〜6回、筋肥大=6〜12回、減量/健康維持=10〜15回。初心者は10回前後で余力2〜3回を残す。
+   d) セット数: 初心者2〜3、中級者3〜4、上級者3〜5。週あたりの部位別セット数(weekly_sets)が10〜20に収まるように調整し、すでに20を超える部位は種目数を減らす。
+   e) 休憩(rest_sec): 大種目の重い(1〜6回)=180〜240秒、大種目(6〜12回)=120〜150秒、単関節=60〜90秒。
+   f) 最初の大種目には warmup を付ける(例: "軽重量8回→60%×4回→80%×2回")。2種目目以降は同じ部位なら省略可。
 4. 器具: style.equipment に無い器具の種目は提案しない(自宅ダンベル=ダンベル種目と自重、自重のみ=自重種目)。
 5. style.note の怪我・要望を最優先で尊重する。
 6. 重量はkg・0.5kg刻み。自重種目の weight_kg は0。種目名は日本語で、available_exercises にあるものを優先する。part は available_exercises のキー(胸・背中・脚・肩・腕・腹・有酸素・その他)から選ぶ。
@@ -1109,6 +1325,7 @@ const CoachAI = (() => {
             reps: { type: "integer" },
             sets: { type: "integer" },
             rest_sec: { type: "integer", description: "セット間の休憩(秒)" },
+            warmup: { type: "string", description: "ウォームアップ(最初の大種目のみ。例: 軽重量8回→60%×4回)" },
             reason: { type: "string", description: "この重量・回数にした根拠を1文で" },
           },
           required: ["exercise", "part", "weight_kg", "reps", "sets", "reason"],
@@ -1129,7 +1346,7 @@ const CoachAI = (() => {
 
 ## 出力形式
 次の形のJSONだけで回答してください(前後に説明文は付けない)。
-{"session_title": string, "split_reasoning": string, "exercises": [{"exercise": string, "part": string, "weight_kg": number, "reps": number, "sets": number, "rest_sec": number, "reason": string}], "notes": string}
+{"session_title": string, "split_reasoning": string, "exercises": [{"exercise": string, "part": string, "weight_kg": number, "reps": number, "sets": number, "rest_sec": number, "warmup": string, "reason": string}], "notes": string}
 
 ## ユーザーのデータ(JSON)
 ${JSON.stringify(context)}`;
@@ -1184,7 +1401,8 @@ ${JSON.stringify(context)}`;
   }
 
   // AIの回答を検証して、画面に出せる形に整える(数値の範囲・文字数・部位名)
-  function clean(raw, knownParts) {
+  // opts.guard(name) → { weight, step }(前回の実績)があれば、それを大きく超える重量は上限に丸める。opts.exclude は今日すでに行った種目
+  function clean(raw, knownParts, opts = {}) {
     if (!raw || typeof raw !== "object") throw new Error("AIの回答を読み取れませんでした");
     const str = (v, n) => String(v ?? "").trim().slice(0, n);
     const clamp = (v, lo, hi, step = 1) => Math.min(hi, Math.max(lo, Math.round((Number(v) || 0) / step) * step));
@@ -1195,8 +1413,16 @@ ${JSON.stringify(context)}`;
       reps: clamp(e?.reps, 1, 50),
       sets: clamp(e?.sets, 1, 10),
       rest: e?.rest_sec ? clamp(e.rest_sec, 0, 600) : 0,
+      warmup: str(e?.warmup, 80),
       reason: str(e?.reason, 140),
-    })).filter((e) => e.exercise);
+    })).filter((e) => e.exercise && !(opts.exclude && opts.exclude.has(e.exercise)));
+    for (const e of exercises) {
+      const g = opts.guard && opts.guard(e.exercise);
+      if (g && e.weight > g.weight * 1.05 + g.step) {
+        e.weight = Math.round((g.weight + g.step) * 2) / 2;
+        e.reason = (e.reason + "(前回実績から大きく離れないよう上限を調整)").slice(0, 160);
+      }
+    }
     if (!exercises.length) throw new Error("提案できる種目がありませんでした。スタイル設定を見直してもう一度お試しください");
     return { title: str(raw.session_title, 60), reasoning: str(raw.split_reasoning, 300), exercises, notes: str(raw.notes, 200) };
   }
@@ -1229,6 +1455,7 @@ function buildDemoData() {
     ["昼食", "白米(150g)", 252, 3.8, 0.5, 55.7], ["昼食", "鶏むね肉(100g)", 108, 22.3, 1.5, 0],
     ["夕食", "白米(150g)", 252, 3.8, 0.5, 55.7], ["夕食", "鶏むね肉(100g)", 216, 44.6, 3, 0],
     ["夕食", "納豆(1パック)", 90, 7.4, 4.5, 5.4], ["プロテイン", "プロテイン(1杯)", 120, 24, 1.5, 3],
+    ["サプリ", "クレアチン", 0, 0, 0, 0, "5g"], ["サプリ", "ビタミンD", 0, 0, 0, 0, "25μg(1000IU)"], ["サプリ", "亜鉛", 0, 0, 0, 0, "15mg"],
   ];
 
   const DAYS = 56;
@@ -1244,7 +1471,7 @@ function buildDemoData() {
       db.workouts.push({ id: id(), date, part, exercise, weight, reps: reps + (rnd() < 0.3 ? 1 : 0), sets: 3 + (rnd() < 0.4 ? 1 : 0) });
     }
     if (dt.getDay() !== 0 || rnd() < 0.5) {
-      for (const [type, name, kcal, p, f, c] of meals) db.meals.push({ id: id(), date, type, name, kcal, p, f, c });
+      for (const [type, name, kcal, p, f, c, dose] of meals) db.meals.push({ id: id(), date, type, name, kcal, p, f, c, ...(dose ? { dose } : {}) });
     }
     if (i % 3 === 0) {
       const weight = round(72 - 1.5 * progress + (rnd() - 0.5) * 0.6);
@@ -1275,7 +1502,7 @@ const BODY_METRICS = {
   fatMass: { label: "体脂肪量", unit: "kg", get: (b, h) => bodyDerived(b, h).fatMass },
   lbm: { label: "除脂肪体重", unit: "kg", get: (b, h) => bodyDerived(b, h).lbm },
 };
-const MEAL_BADGE = { 朝食: "朝", 昼食: "昼", 夕食: "夕", 間食: "間", プロテイン: "P" };
+const MEAL_BADGE = { 朝食: "朝", 昼食: "昼", 夕食: "夕", 間食: "間", プロテイン: "P", サプリ: "サ" };
 
 // ---- 初期化 ----
 $("date").value = today();
@@ -1314,6 +1541,11 @@ $("ex-form").addEventListener("submit", (e) => {
 document.addEventListener("click", (e) => {
   const b = e.target.closest(".use");
   if (!b) return;
+  if (b.dataset.w) { // 提案を採用した記録。次回、実績と比べて提案を調整する
+    db.recLog = (db.recLog || []).filter((r) => !(r.date === curDate() && r.exercise === b.dataset.ex))
+      .concat({ date: curDate(), exercise: b.dataset.ex, weight: +b.dataset.w, reps: +b.dataset.r }).slice(-120);
+    Store.save(db);
+  }
   $("w-part").value = b.dataset.part;
   fillExerciseList();
   $("w-exercise").value = b.dataset.ex;
@@ -1324,10 +1556,64 @@ document.addEventListener("click", (e) => {
   $("workout-form").scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
-$("food-list").innerHTML = FOODS.map((f) => `<option value="${f[0]}">`).join("");
+// 自分で登録した食品・サプリ(先頭に並べる)とプリセット
+const MEAL_TYPES = ["朝食", "昼食", "夕食", "間食", "プロテイン", "サプリ"];
+const customOf = (kind) => (db.customFoods || []).filter((c) => c.kind === kind);
+const foodItems = () => [...customOf("food").map((c) => [c.name, c.kcal, c.p, c.f, c.c]), ...FOODS];
+const suppItems = () => [...customOf("supp").map((c) => [c.name, c.dose || "", c.kcal, c.p, c.f, c.c]), ...SUPPLEMENTS];
+
+function fillMealTypes() {
+  const sel = $("m-type"), cur = sel.value;
+  const names = [...MEAL_TYPES, ...(db.customMealTypes || []).map((t) => t.name)];
+  sel.innerHTML = names.map((n) => `<option>${esc(n)}</option>`).join("");
+  if (names.includes(cur)) sel.value = cur;
+}
+
+// 区分が「サプリ」のときは候補をサプリにし、用量欄を出す
+function fillFoodList() {
+  const supp = $("m-type").value === "サプリ";
+  $("food-list").innerHTML = (supp ? suppItems() : foodItems()).map((f) => `<option value="${esc(f[0])}">`).join("");
+  $("dose-field").hidden = !supp;
+}
+$("m-type").addEventListener("change", fillFoodList);
+fillMealTypes();
+fillFoodList();
+
+// 食品・サプリの登録
+$("cf-kind").addEventListener("change", () => { $("cf-dose-field").hidden = $("cf-kind").value !== "supp"; });
+$("cf-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const kind = $("cf-kind").value, name = $("cf-name").value.trim();
+  const exists = (kind === "supp" ? suppItems() : foodItems()).some((x) => x[0] === name);
+  if (!name || exists) { $("cf-notice").textContent = exists ? `「${name}」は登録済みです` : ""; return; }
+  const n = (id) => +$(id).value || 0;
+  (db.customFoods ||= []).push({
+    id: Store.newId(), kind, name, dose: kind === "supp" ? $("cf-dose").value.trim() : "",
+    kcal: n("cf-kcal"), p: n("cf-p"), f: n("cf-f"), c: n("cf-c"),
+  });
+  e.target.reset();
+  $("cf-dose-field").hidden = true;
+  $("cf-notice").textContent = `「${name}」を登録しました。${kind === "supp" ? "サプリのボタンと候補" : "食品の候補"}に出ます`;
+  persist();
+});
+
+// 食事の区分の追加
+$("ct-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("ct-name").value.trim();
+  const exists = [...MEAL_TYPES, ...(db.customMealTypes || []).map((t) => t.name)].includes(name);
+  if (!name || exists) { $("ct-notice").textContent = exists ? `「${name}」は既にあります` : ""; return; }
+  (db.customMealTypes ||= []).push({ id: Store.newId(), name });
+  e.target.reset();
+  $("ct-notice").textContent = `区分「${name}」を追加しました`;
+  persist();
+});
 $("m-name").addEventListener("input", () => {
-  const f = FOODS.find((x) => x[0] === $("m-name").value);
-  if (f) { $("m-kcal").value = f[1]; $("m-p").value = f[2]; $("m-f").value = f[3]; $("m-c").value = f[4]; }
+  const supp = $("m-type").value === "サプリ";
+  const f = (supp ? suppItems() : foodItems()).find((x) => x[0] === $("m-name").value);
+  if (!f) return;
+  if (supp) { $("m-dose").value = f[1]; [$("m-kcal").value, $("m-p").value, $("m-f").value, $("m-c").value] = f.slice(2); }
+  else { $("m-kcal").value = f[1]; $("m-p").value = f[2]; $("m-f").value = f[3]; $("m-c").value = f[4]; }
 });
 
 for (const [k, m] of Object.entries(BODY_METRICS)) $("body-metric").add(new Option(m.label, k));
@@ -1364,9 +1650,16 @@ $("style-form").addEventListener("submit", (e) => {
   persist();
 });
 
+// おすすめの調整に使う付帯情報(体重・経験・過去の提案結果)
+function tuneCtx() {
+  const b = [...db.body].sort((x, y) => y.date.localeCompare(x.date))[0];
+  return { bw: b ? b.weight : null, level: style().level, outcomesOf: (ex) => recOutcomes(db.workouts, db.recLog || [], ex) };
+}
+const tuneOpts = (ctx, ex) => ({ bw: ctx.bw, level: ctx.level, outcomes: ctx.outcomesOf(ex) });
+
 // AIに渡す材料: スタイル・今日の記録・各部位の空き日数・種目ごとの直近の記録と、ルールベースの参考値
 function coachContext(d) {
-  const st = style(), sp = split(), cat = catalog();
+  const st = style(), sp = split(), cat = catalog(), tc = tuneCtx();
   const since = {};
   Object.keys(cat).forEach((p) => {
     const last = db.workouts.filter((w) => w.part === p && w.date <= d).reduce((m, w) => (w.date > m ? w.date : m), "");
@@ -1377,8 +1670,9 @@ function coachContext(d) {
   const history = names.map((n) => {
     const ss = sessionsOf(db.workouts, n, d).slice(-3);
     const top = (s) => s.rows.reduce((a, b) => (est1RM(b.weight, b.reps) > est1RM(a.weight, a.reps) ? b : a));
-    const t = nextTarget(db.workouts, n, d, st.goal);
+    const t = nextTarget(db.workouts, n, d, st.goal, tuneOpts(tc, n));
     return {
+      last_rec_results: tc.outcomesOf(n),
       exercise: n, part: ss[ss.length - 1].rows[0].part, last_date: ss[ss.length - 1].date,
       recent_sessions: ss.map((s) => ({ date: s.date, top_set: `${top(s).weight}kg×${top(s).reps}回`, sets: sum(s.rows, (r) => r.sets) })),
       reference_target: t ? { weight_kg: t.weight, reps: t.reps, sets: t.sets } : null,
@@ -1396,6 +1690,10 @@ function coachContext(d) {
     today_done: db.workouts.filter((w) => w.date === d).map((w) => ({ exercise: w.exercise, part: w.part, weight_kg: w.weight, reps: w.reps, sets: w.sets })),
     part_days_since: since,
     history,
+    weekly_sets: Object.fromEntries(Object.keys(cat).map((p) => [p, sum(inRange(db.workouts, shiftDate(d, -6), d).filter((w) => w.part === p), (w) => w.sets)]).filter(([, n]) => n)),
+    estimated_start: Object.fromEntries(Object.values(cat).flat().filter((n) => !names.includes(n))
+      .map((n) => [n, estimateStart(db.workouts, n, d, st.goal, tc)]).filter(([, t]) => t)
+      .map(([n, t]) => [n, { weight_kg: t.weight, reps: t.reps, basis: t.reason }])),
     available_exercises: Object.fromEntries(Object.entries(cat).filter(([, l]) => l.length)),
   };
 }
@@ -1409,7 +1707,15 @@ $("ai-rec").addEventListener("click", async () => {
   btn.textContent = "AIが考えています…(最大1分ほど)";
   try {
     const raw = await CoachAI.plan(coachContext(d));
-    db.aiRec = { date: d, result: CoachAI.clean(raw, Object.keys(catalog())) };
+    db.aiRec = { date: d, result: CoachAI.clean(raw, Object.keys(catalog()), {
+      exclude: new Set(db.workouts.filter((w) => w.date === d).map((w) => w.exercise)),
+      guard: (n) => {
+        const ss = sessionsOf(db.workouts, n, d);
+        if (!ss.length) return null;
+        const t = ss[ss.length - 1].rows.reduce((a, c) => (c.weight > a.weight ? c : a));
+        return { weight: t.weight, step: weightStep(t.weight, n) };
+      },
+    }) };
     Store.save(db);
     renderRecommend(d);
   } catch (e) {
@@ -1423,6 +1729,18 @@ $("ai-rec").addEventListener("click", async () => {
 
 // 「設定する」などのリンクボタンからタブを切り替える
 document.addEventListener("click", (e) => {
+  const sp = e.target.closest("[data-supp]");
+  if (sp) {
+    const s = suppList()[+sp.dataset.supp];
+    if (s) { db.meals.push({ id: Store.newId(), date: curDate(), type: "サプリ", name: s.name, dose: s.dose, kcal: s.kcal, p: s.p, f: s.f, c: s.c }); persist(); }
+    return;
+  }
+  const r = e.target.closest("[data-recent]");
+  if (r) {
+    const m = db.meals.find((x) => x.id === r.dataset.recent);
+    if (m) { $("m-name").value = m.name; $("m-kcal").value = m.kcal; $("m-p").value = m.p; $("m-f").value = m.f; $("m-c").value = m.c; $("m-type").value = m.type; fillFoodList(); $("m-dose").value = m.dose || ""; }
+    return;
+  }
   const g = e.target.closest("[data-goto]");
   if (g) document.querySelector(`nav button[data-tab="${g.dataset.goto}"]`).click();
 });
@@ -1451,8 +1769,10 @@ $("meal-form").addEventListener("submit", (e) => {
   db.meals.push({
     id: Store.newId(), date: curDate(), type: $("m-type").value, name: $("m-name").value.trim(),
     kcal: +$("m-kcal").value, p: +$("m-p").value || 0, f: +$("m-f").value || 0, c: +$("m-c").value || 0,
+    ...($("m-type").value === "サプリ" && $("m-dose").value.trim() ? { dose: $("m-dose").value.trim() } : {}),
   });
   e.target.reset();
+  fillFoodList();
   persist();
 });
 
@@ -1504,7 +1824,7 @@ function renderAi(msg) {
     <img class="ai-photo" src="${aiMeal.preview}" alt="解析した写真">
     <p class="summary">${esc(aiMeal.meal_name || "食事")}<br>${round(t.kcal)}kcal ／ P ${round(t.p)}g F ${round(t.f)}g C ${round(t.c)}g</p>
     <ul class="list">${aiMeal.items.map((i, n) => `
-      <li class="item"><div class="body"><b>${esc(i.name)}</b>${chips([i.grams_min ? `${round(i.grams_min, 0)}〜${round(i.grams_max, 0)}g` : "", `${round(i.kcal)}kcal`, `P ${round(i.p)}g`, `F ${round(i.f)}g`, `C ${round(i.c)}g`, CONF[i.confidence]])}
+      <li class="item"><div class="body"><input data-ai-name="${n}" value="${esc(i.name)}" aria-label="料理名" maxlength="60">${chips([i.grams_min ? `${round(i.grams_min, 0)}〜${round(i.grams_max, 0)}g` : "", `${round(i.kcal)}kcal`, `P ${round(i.p)}g`, `F ${round(i.f)}g`, `C ${round(i.c)}g`, CONF[i.confidence]])}
         <p class="hint">${esc(i.size_basis || "")}</p>
         <label class="f">量 (g)<input type="number" inputmode="decimal" min="0" step="1" value="${round(i.grams)}" data-ai-grams="${n}"></label></div>
         <button class="del" data-ai-del="${n}" aria-label="除外">✕</button></li>`).join("")}</ul>
@@ -1518,9 +1838,9 @@ $("ai-photo").addEventListener("change", async (e) => {
   e.target.value = "";
   if (!file) return;
   aiMeal = null;
-  renderAi("解析中…(10〜20秒ほどかかります)");
+  renderAi($("ai-precise").checked ? "高精度モードで解析中…(最大1分ほどかかります)" : "解析中…(10〜20秒ほどかかります)");
   try {
-    const r = await FoodAI.analyze(file, { reference: $("ai-ref").value, note: $("ai-note").value.trim() });
+    const r = await FoodAI.analyze(file, { reference: $("ai-ref").value, note: $("ai-note").value.trim(), precise: $("ai-precise").checked });
     aiMeal = { ...r, items: r.items.map((i) => ({ ...i, base: { ...i } })) };
     if (aiMeal.items.length) renderAi();
     else renderAi(r.notes || "食事が見つかりませんでした");
@@ -1530,6 +1850,8 @@ $("ai-photo").addEventListener("change", async (e) => {
 });
 
 $("ai-result").addEventListener("change", (e) => {
+  const nm = e.target.dataset.aiName;
+  if (nm != null) { aiMeal.items[nm].name = e.target.value.trim() || aiMeal.items[nm].name; renderAi(); return; }
   const n = e.target.dataset.aiGrams;
   if (n == null) return;
   const i = aiMeal.items[n], b = i.base, g = Math.max(0, +e.target.value || 0);
@@ -1543,6 +1865,7 @@ $("ai-result").addEventListener("click", (e) => {
   if (e.target.id === "ai-add") {
     FoodAI.recordCorrections(aiMeal.items.filter((i) => i.base.grams > 0 && i.grams > 0 && Math.abs(i.grams - i.base.grams) / i.base.grams >= 0.05)
       .map((i) => ({ name: i.name, ai: Math.round(i.base.grams), actual: Math.round(i.grams) })));
+    FoodAI.recordLearned(aiMeal.items);
     for (const i of aiMeal.items) {
       db.meals.push({ id: Store.newId(), date: curDate(), type: $("m-type").value, name: i.name, kcal: round(i.kcal), p: round(i.p), f: round(i.f), c: round(i.c) });
     }
@@ -1559,8 +1882,8 @@ $("ai-form").addEventListener("submit", (e) => {
   FoodAI.setModel($("ai-model").value || FoodAI.DEFAULT_MODEL);
   $("ai-notice").textContent = "保存しました";
 });
-const showLearn = () => { $("ai-learn-count").textContent = `覚えた補正: ${FoodAI.correctionCount()}件`; };
-$("ai-learn-clear").addEventListener("click", () => { FoodAI.clearCorrections(); showLearn(); });
+const showLearn = () => { $("ai-learn-count").textContent = `覚えた補正: ${FoodAI.correctionCount()}件 ／ 覚えた料理: ${FoodAI.learnedCount()}件`; };
+$("ai-learn-clear").addEventListener("click", () => { FoodAI.clearCorrections(); FoodAI.clearLearned(); showLearn(); });
 showLearn();
 FoodAI.usesClaudeApp().then((ok) => { if (ok) $("ai-settings").hidden = true; }); // サブスク(アーティファクト)ではキー設定不要
 $("ai-key").value = FoodAI.getKey();
@@ -1655,7 +1978,7 @@ function recItem(r, withUse) {
   const btn = withUse
     ? `<button type="button" class="use" data-ex="${esc(r.exercise)}" data-part="${esc(r.part)}" data-w="${t ? t.weight : ""}" data-r="${t ? t.reps : ""}" data-s="${t ? t.sets : 3}">入力</button>`
     : "";
-  return `<li class="item"><div class="badge">${esc(r.part)}</div><div class="body"><b>${esc(r.exercise)}</b>${chips([plan, r.rest && `休憩 ${r.rest}秒`])}<span class="reason">${esc(t ? t.reason : r.reason)}</span>${t && withUse ? `<span class="reason">${esc(r.reason)}</span>` : ""}</div>${btn}</li>`;
+  return `<li class="item"><div class="badge">${esc(r.part)}</div><div class="body"><b>${esc(r.exercise)}</b>${chips([plan, r.rest && `休憩 ${r.rest}秒`, r.warmup && `W-up ${r.warmup}`])}<span class="reason">${esc(t ? t.reason : r.reason)}</span>${t && withUse ? `<span class="reason">${esc(r.reason)}</span>` : ""}</div>${btn}</li>`;
 }
 
 function renderRecommend(d) {
@@ -1671,15 +1994,15 @@ function renderRecommend(d) {
   $("ai-rec").textContent = ai ? "✨ AIでメニューを作り直す" : "✨ AIで今日のメニューを作る";
   $("ai-rec-out").innerHTML = ai
     ? `<div class="ai-box"><h4>✨ ${esc(ai.title || "今日のメニュー")}</h4><p>${esc(ai.reasoning)}</p><ul class="list">${ai.exercises.map((e) =>
-        recItem({ exercise: e.exercise, part: e.part, rest: e.rest, reason: "", target: { weight: e.weight, reps: e.reps, sets: e.sets, reason: e.reason } }, true)).join("")}</ul>${ai.notes ? `<p class="note">${esc(ai.notes)}</p>` : ""}</div>`
+        recItem({ exercise: e.exercise, part: e.part, rest: e.rest, warmup: e.warmup, reason: "", target: { weight: e.weight, reps: e.reps, sets: e.sets, reason: e.reason } }, true)).join("")}</ul>${ai.notes ? `<p class="note">${esc(ai.notes)}</p>` : ""}</div>`
     : "";
 
-  const next = recommendNext(db.workouts, d, cat, sp, st.goal);
+  const next = recommendNext(db.workouts, d, cat, sp, st.goal, tuneCtx());
   $("rec-next").innerHTML = next.length ? next.map((r) => recItem(r, true)).join("") : empty("記録が増えると、次の種目を提案します");
 
   const names = [...new Set(db.workouts.filter((w) => w.date === d && w.weight > 0).map((w) => w.exercise))];
   const partOf = Object.fromEntries(db.workouts.map((w) => [w.exercise, w.part]));
-  const targets = names.map((n) => ({ exercise: n, part: partOf[n], target: nextTarget(db.workouts, n, d, st.goal) })).filter((r) => r.target);
+  const targets = names.map((n) => ({ exercise: n, part: partOf[n], target: nextTarget(db.workouts, n, d, st.goal, tuneOpts(tuneCtx(), n)) })).filter((r) => r.target);
   $("rec-target").innerHTML = targets.length ? targets.map((r) => recItem(r, false)).join("") : empty("今日の種目を記録すると、次回の重量・回数を提案します");
 
   $("ex-list").innerHTML = (db.customExercises || []).length
@@ -1709,6 +2032,41 @@ function renderWorkout(d) {
   $("workout-summary").textContent = `この日の総負荷量: ${num(totalVolume(ws))} kg(${ws.length}件)`;
 }
 
+// 記録したことのあるサプリ(初めて記録した順。タップしても並びが動かない)+ プリセットで8件まで
+function suppList() {
+  const last = {}, cnt = {};
+  db.meals.filter((m) => m.type === "サプリ").forEach((m) => { last[m.name] = m; cnt[m.name] = 1; });
+  const out = Object.keys(cnt).map((n) => ({ name: n, dose: last[n].dose || "", kcal: last[n].kcal, p: last[n].p, f: last[n].f, c: last[n].c }));
+  suppItems().forEach(([name, dose, kcal, p, f, c]) => { if (out.length < 8 && !out.some((o) => o.name === name)) out.push({ name, dose, kcal, p, f, c }); });
+  return out.slice(0, 12);
+}
+
+// 登録した食品・サプリ・区分の管理画面
+function renderCustom() {
+  const delRow = (kind, id, badge, title, sub) =>
+    `<li class="item"><div class="badge light">${esc(badge)}</div><div class="body"><b>${esc(title)}</b>${sub}</div>${delBtn(kind, id)}</li>`;
+  const cf = db.customFoods || [];
+  $("cf-list").innerHTML = cf.length ? cf.map((c) => delRow("customFoods", c.id, c.kind === "supp" ? "サ" : "食", c.name,
+    chips([c.kind === "supp" && c.dose && esc(c.dose), c.kcal > 0 && `${c.kcal}kcal`, (c.p || c.f || c.c) && `P ${c.p}g F ${c.f}g C ${c.c}g`]))).join("")
+    : empty("登録した食品・サプリはまだありません");
+  const ct = db.customMealTypes || [];
+  $("ct-list").innerHTML = ct.length ? ct.map((t) => delRow("customMealTypes", t.id, [...t.name][0], t.name, "")).join("") : empty("追加した区分はまだありません");
+  fillMealTypes();
+  fillFoodList();
+}
+
+function renderSupplements(d) {
+  const today = db.meals.filter((m) => m.date === d && m.type === "サプリ");
+  $("supp-chips").innerHTML = suppList().map((s, i) => {
+    const n = today.filter((m) => m.name === s.name).length;
+    return `<button type="button" data-supp="${i}" class="${n ? "on" : ""}">${n ? "✓ " : ""}${esc(s.name)}${n > 1 ? ` ×${n}` : ""}<small>${esc(s.dose)}</small></button>`;
+  }).join("");
+  const days = {};
+  db.meals.filter((m) => m.type === "サプリ" && m.date.slice(0, 7) === d.slice(0, 7)).forEach((m) => (days[m.name] ||= new Set()).add(m.date));
+  const top = Object.entries(days).sort((a, b) => b[1].size - a[1].size).slice(0, 5);
+  $("supp-month").textContent = top.length ? "今月の摂取日数: " + top.map(([n, s]) => `${n} ${s.size}日`).join(" / ") : "サプリを記録すると、今月の摂取日数が表示されます";
+}
+
 function renderMeals(d) {
   const ms = db.meals.filter((m) => m.date === d);
   const kcal = sum(ms, (m) => m.kcal), P = sum(ms, (m) => m.p), F = sum(ms, (m) => m.f), C = sum(ms, (m) => m.c);
@@ -1722,9 +2080,19 @@ function renderMeals(d) {
     macro("P", P, P * 4, db.goal.p ? `<em> /${db.goal.p}</em>` : "") + macro("F", F, F * 9) + macro("C", C, C * 4) +
     `<span class="hint">バーはカロリー比率</span>`;
 
+  // 最近の食事: タップでフォームに入力(同じ物をよく食べる人向け)
+  const seen = new Set(), recent = [];
+  for (const m of [...db.meals].reverse()) { if (!seen.has(m.name)) { seen.add(m.name); recent.push(m); } if (recent.length >= 8) break; }
+  $("recent-meals").hidden = !recent.length;
+  $("recent-meals").innerHTML = recent.map((m) => `<button type="button" data-recent="${esc(m.id)}">${esc(m.name)}</button>`).join("");
+
+  renderSupplements(d);
+  renderCustom();
+
   $("meal-list").innerHTML = ms.length ? ms.map((m) =>
-    `<li class="item"><div class="badge light">${MEAL_BADGE[m.type] || esc(m.type)}</div><div class="body"><b>${esc(m.name)}</b>${chips([
-      `${m.kcal}kcal`, `P ${m.p}g`, `F ${m.f}g`, `C ${m.c}g`])}</div>${delBtn("meals", m.id)}</li>`).join("")
+    `<li class="item"><div class="badge light">${MEAL_BADGE[m.type] || esc([...m.type].slice(0, 2).join(""))}</div><div class="body"><b>${esc(m.name)}</b>${chips(m.type === "サプリ"
+      ? [m.dose && esc(m.dose), m.kcal > 0 && `${m.kcal}kcal`, m.p > 0 && `P ${m.p}g`]
+      : [`${m.kcal}kcal`, `P ${m.p}g`, `F ${m.f}g`, `C ${m.c}g`])}</div>${delBtn("meals", m.id)}</li>`).join("")
     : empty("この日の食事記録はありません");
 }
 
@@ -1820,6 +2188,9 @@ function renderStats(d) {
   drawRing($("ring-p"), db.goal.p ? p / db.goal.p : 0, db.goal.p ? Math.round((p / db.goal.p) * 100) + "%" : "—", `${round(p)}g`);
 
   const days = Array.from({ length: 14 }, (_, i) => shiftDate(d, i - 13));
+  const sumDay = (dt, k) => sum(db.meals.filter((m) => m.date === dt), (m) => m[k]);
+  drawBars($("kcal-chart"), days.map((dt) => ({ label: dt.slice(8), v: sumDay(dt, "kcal") })), { highlight: 13 });
+  drawBars($("protein-chart"), days.map((dt) => ({ label: dt.slice(8), v: sumDay(dt, "p") })), { highlight: 13 });
   drawBars($("days-chart"), days.map((dt) => ({ label: dt.slice(8), v: totalVolume(db.workouts.filter((w) => w.date === dt)) })), { highlight: 13 });
 
   const dates = [...new Set([...db.workouts, ...db.meals].map((r) => r.date))].sort().reverse().slice(0, 14);
@@ -1837,4 +2208,45 @@ if (window.DEMO_AUTOLOAD && !db.workouts.length && !db.meals.length && !db.body.
 }
 
 render();
+</script>
+  <script>
+// アプリ化(PWA)の補助: サービスワーカー登録とインストール案内。
+// file:// やアーティファクト内ではサービスワーカーが使えないので、何もしない。
+(() => {
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const panel = document.getElementById("install-panel");
+  const btn = document.getElementById("install-btn");
+  const msg = document.getElementById("install-msg");
+  const web = /^https?:$/.test(location.protocol);
+
+  if (web && "serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+  if (!panel || !web || window.top !== window.self) return; // アーティファクトなどの埋め込み表示では案内しない
+
+  if (standalone) { panel.hidden = false; msg.textContent = "アプリとして起動しています。オフラインでも記録できます。"; return; }
+  panel.hidden = false;
+
+  // iPhone/iPad は自動のインストール画面が無いので、手順を案内する
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  msg.textContent = ios
+    ? "Safariの共有ボタン(□↑)から「ホーム画面に追加」を選ぶと、アプリとして使えます。"
+    : "ブラウザのメニューの「アプリをインストール」または「ホーム画面に追加」から、アプリとして使えます。";
+
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferred = e;
+    btn.hidden = false;
+    msg.textContent = "ホーム画面に追加すると、アプリのように起動でき、オフラインでも記録できます。";
+  });
+  btn.addEventListener("click", async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    await deferred.userChoice.catch(() => {});
+    deferred = null;
+    btn.hidden = true;
+  });
+  window.addEventListener("appinstalled", () => { btn.hidden = true; msg.textContent = "インストールしました。ホーム画面から開いてください。"; });
+})();
 </script>

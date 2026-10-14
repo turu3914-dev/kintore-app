@@ -19,6 +19,7 @@ function buildDemoData() {
     ["昼食", "白米(150g)", 252, 3.8, 0.5, 55.7], ["昼食", "鶏むね肉(100g)", 108, 22.3, 1.5, 0],
     ["夕食", "白米(150g)", 252, 3.8, 0.5, 55.7], ["夕食", "鶏むね肉(100g)", 216, 44.6, 3, 0],
     ["夕食", "納豆(1パック)", 90, 7.4, 4.5, 5.4], ["プロテイン", "プロテイン(1杯)", 120, 24, 1.5, 3],
+    ["サプリ", "クレアチン", 0, 0, 0, 0, "5g"], ["サプリ", "ビタミンD", 0, 0, 0, 0, "25μg(1000IU)"], ["サプリ", "亜鉛", 0, 0, 0, 0, "15mg"],
   ];
 
   const DAYS = 56;
@@ -34,7 +35,7 @@ function buildDemoData() {
       db.workouts.push({ id: id(), date, part, exercise, weight, reps: reps + (rnd() < 0.3 ? 1 : 0), sets: 3 + (rnd() < 0.4 ? 1 : 0) });
     }
     if (dt.getDay() !== 0 || rnd() < 0.5) {
-      for (const [type, name, kcal, p, f, c] of meals) db.meals.push({ id: id(), date, type, name, kcal, p, f, c });
+      for (const [type, name, kcal, p, f, c, dose] of meals) db.meals.push({ id: id(), date, type, name, kcal, p, f, c, ...(dose ? { dose } : {}) });
     }
     if (i % 3 === 0) {
       const weight = round(72 - 1.5 * progress + (rnd() - 0.5) * 0.6);

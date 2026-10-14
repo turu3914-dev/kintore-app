@@ -1,9 +1,9 @@
 // localStorage への保存・読み込み。
-// データ構造: { workouts: [], meals: [], body: [], goal: {kcal, p}, profile: {height}, customExercises: [{id, part, name}] }
+// データ構造: { workouts: [], meals: [], body: [], goal: {kcal, p}, profile: {height}, customExercises: [{id, part, name}], customFoods: [{id, kind: "food"|"supp", name, dose, kcal, p, f, c}], customMealTypes: [{id, name}] }
 // 各レコードは date(YYYY-MM-DD) と id を持つ。
 const KEY = "kintore-app-v1";
 
-const emptyDb = () => ({ workouts: [], meals: [], body: [], goal: {}, profile: {}, customExercises: [] });
+const emptyDb = () => ({ workouts: [], meals: [], body: [], goal: {}, profile: {}, customExercises: [], customFoods: [], customMealTypes: [] });
 
 const Store = {
   load() {
@@ -14,7 +14,7 @@ const Store = {
     }
   },
   save(db) {
-    localStorage.setItem(KEY, JSON.stringify(db));
+    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} // 保存できない環境でも画面は動かす
   },
   newId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

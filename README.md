@@ -12,6 +12,13 @@
 - **履歴・統計**: 日別サマリー、1日の目標(kcal/タンパク質)達成度
 - **バックアップ**: JSONの書き出し/読み込み
 
+## アプリとして使う(PWA)
+HTTPS(または localhost)で配信すると、スマホの「ホーム画面に追加」でアプリとして起動でき、オフラインでも記録できます。
+- Android/Chrome: メニューの「アプリをインストール」/ 設定タブの「ホーム画面に追加」ボタン
+- iPhone/Safari: 共有ボタン →「ホーム画面に追加」
+- ファイルを更新したら `sw.js` の `CACHE` のバージョンを上げる
+- アイコンの再生成: `node tools/make-icons.js`
+
 ## 構成
 ```
 index.html      画面
@@ -21,6 +28,10 @@ js/storage.js   localStorage 入出力
 js/foodai.js    食事写真の解析(Claude API)
 js/coachai.js   スタイル+履歴からの今日のメニュー提案(AI)
 js/app.js       画面ロジック
+js/pwa.js       サービスワーカー登録・インストール案内
+sw.js           オフライン用キャッシュ
+manifest.webmanifest  アプリ名・アイコン・表示設定
+icons/          アプリアイコン(tools/make-icons.js で生成)
 ```
 
 ## 今後の拡張案
