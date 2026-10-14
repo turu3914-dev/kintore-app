@@ -951,17 +951,81 @@ const FoodAI = (() => {
     cv.height = Math.round(bmp.height * s);
     cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
     const url = cv.toDataURL("image/jpeg", 0.85);
-    return { data: url.split(",")[1], url };
+    const blob = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.85));
+    return { data: url.split(",")[1], url, blob };
+  }
+
+  // Claudeアーティファクト内なら、viewer自身のClaude利用枠(claude.use("sample"))で解析できる。
+  // 写真を送れる場合(マニフェストで images 宣言済み)だけ使い、それ以外は null(=APIキー方式にフォールバック)
+  let samplePromise = null;
+  function getSample() {
+    samplePromise ||= (async () => {
+      try {
+        const sample = window.claude ? await window.claude.use("sample") : null;
+        if (!sample) return null;
+        const lim = await sample.limits().catch(() => null);
+        return lim && lim.images ? sample : null;
+      } catch { return null; }
+    })();
+    return samplePromise;
+  }
+
+  // AIの回答を検証して整える: 型・範囲・列挙値を直し、読めない品目は捨てる
+  function normalize(out) {
+    const str = (v, n) => String(v ?? "").trim().slice(0, n);
+    const numv = (v, max) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? Math.min(x, max) : 0; };
+    if (!out || typeof out !== "object") {
+      return { meal_name: "", scale_reference: "", notes: "解析結果を読み取れませんでした。もう一度お試しください", items: [] };
+    }
+    const items = (Array.isArray(out.items) ? out.items : []).slice(0, 15).map((i) => {
+      if (!i || typeof i !== "object") return null;
+      const p = numv(i.p, 500), f = numv(i.f, 500), c = numv(i.c, 1000);
+      const volume = numv(i.volume_ml, 5000), density = numv(i.density, 3);
+      let grams = numv(i.grams, 3000);
+      if (!grams && volume && density) grams = volume * density; // 重量が欠けていれば 体積×密度 で補う
+      let kcal = numv(i.kcal, 5000);
+      if (!kcal) kcal = 4 * p + 9 * f + 4 * c; // kcal が欠けていれば PFC から補う
+      const gmin = numv(i.grams_min, 3000), gmax = numv(i.grams_max, 3000);
+      const ranged = gmin > 0 && gmax >= gmin && gmin <= grams && grams <= gmax;
+      return {
+        name: str(i.name, 60), dims_cm: str(i.dims_cm, 60), volume_ml: volume, density, grams,
+        grams_min: ranged ? gmin : null, grams_max: ranged ? gmax : null,
+        size_basis: str(i.size_basis, 160), kcal, p, f, c,
+        confidence: ["high", "medium", "low"].includes(i.confidence) ? i.confidence : "low",
+      };
+    }).filter((i) => i && i.name && i.grams > 0);
+    return { meal_name: str(out.meal_name, 60), scale_reference: str(out.scale_reference, 160), notes: str(out.notes, 300), items };
+  }
+
+  const SAMPLE_ERRORS = {
+    not_granted: "Claudeの利用が許可されていません",
+    rate_limited: "利用回数の上限です。しばらくしてから再試行してください",
+    invalid_json: "解析結果を読み取れませんでした。もう一度お試しください",
+    image_rejected: "この画像は使えません。別の写真を選んでください",
+  };
+
+  async function analyzeViaSample(sample, img, hints) {
+    const prompt = buildSystem() + "\n\n## 出力形式\n上の出力例と同じ形式の、1つのJSONオブジェクトだけで回答してください(前後に説明文は付けない)。\n\n" +
+      "添付した食事写真の内容・量・栄養素を分析してください。" + (hints ? "\n" + hints : "");
+    try {
+      return await sample.json(prompt, { images: img.blob, cache: false });
+    } catch (e) {
+      if (e && e.code) throw new Error(SAMPLE_ERRORS[e.code] || `解析に失敗しました (${e.code})`);
+      throw e;
+    }
   }
 
   async function analyze(file, { reference = "", note = "" } = {}) {
+    const sample = await getSample();
     const key = get(KEY_STORE);
-    if (!key) throw new Error("先に「履歴・設定」タブでAPIキーを設定してください");
+    if (!sample && !key) throw new Error("先に「履歴・設定」タブでAPIキーを設定してください");
     const img = await toBase64(file);
     const hints = [
       reference && `大きさの基準物: ${reference}`,
       note && `ユーザーの補足: ${note}`,
     ].filter(Boolean).join("\n");
+
+    if (sample) return { ...normalize(await analyzeViaSample(sample, img, hints)), preview: img.url };
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
