@@ -2,7 +2,7 @@
 // アプリ本体(HTML/CSS/JS/アイコン)をキャッシュし、同じオリジンの GET だけを扱う。
 // Anthropic API など外部への通信には一切関与しない。
 // ファイルを更新したら CACHE のバージョンを上げる(古いキャッシュは起動時に消える)。
-const CACHE = "kintore-v3";
+const CACHE = "kintore-v4";
 const ASSETS = [
   "./", "index.html", "manifest.webmanifest", "css/style.css",
   "js/data.js", "js/storage.js", "js/calc.js", "js/charts.js", "js/foodknowledge.js",

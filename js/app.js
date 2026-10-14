@@ -415,6 +415,7 @@ $("import").addEventListener("change", async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.workouts) || !Array.isArray(data.meals)) throw new Error();
+    Store.snapshot();
     db = Object.assign(emptyDb(), data);
     persist();
   } catch {
@@ -434,9 +435,28 @@ $("load-demo").addEventListener("click", () => {
   }
   demoArmed = false;
   $("load-demo").textContent = "デモデータを読み込む";
+  Store.snapshot();
   db = buildDemoData();
   persist();
+  showRestore();
 });
+
+// 直前のデータの復元(デモ読込・インポート・破損で消えた場合)
+function showRestore() {
+  const r = Store.recoverable();
+  const b = $("restore");
+  if (b) b.hidden = !r || (db.workouts.length + db.meals.length + db.body.length > 0 && r.workouts.length + r.meals.length <= db.workouts.length + db.meals.length);
+}
+$("restore").addEventListener("click", () => {
+  const r = Store.recoverable();
+  if (!r) return;
+  db = r;
+  persist();
+  showRestore();
+  $("data-notice").textContent = "以前のデータを復元しました";
+});
+Store.persistent();
+showRestore();
 
 // ---- 画像保存 ----
 $("save-image").addEventListener("click", () => {
