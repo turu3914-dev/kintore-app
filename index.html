@@ -34,8 +34,10 @@
         <canvas id="week-chart" class="chart short"></canvas>
       </div>
 
-      <div class="panel">
-        <h3>種目を追加</h3>
+      <button type="button" id="add-training" class="primary block">＋ 今日のトレーニング追加</button>
+
+      <div class="panel" id="workout-panel" hidden>
+        <h3>種目を追加 <small id="w-title"></small></h3>
         <form id="workout-form" class="grid2">
           <label class="f">部位<select id="w-part"></select></label>
           <label class="f">種目<input id="w-exercise" list="exercise-list" placeholder="例: ベンチプレス" required></label>
@@ -285,7 +287,8 @@
 
       <div class="panel">
         <h3>データ</h3>
-        <button id="export" class="secondary block">JSONで書き出し</button>
+        <button id="export" class="secondary block">バックアップを書き出し(共有)</button>
+        <p id="export-status" class="hint" role="status"></p>
         <label class="file block">JSONを読み込み<input type="file" id="import" accept="application/json" hidden></label>
         <button id="restore" class="secondary block" hidden>消えたデータを復元する</button>
         <button id="load-demo" class="secondary block">デモデータを読み込む</button>
@@ -293,6 +296,15 @@
       </div>
     </section>
   </main>
+
+  <div id="picker" class="picker" hidden role="dialog" aria-label="種目を選択">
+    <div class="picker-bar">
+      <button type="button" id="picker-back" aria-label="戻る">‹</button>
+      <b>種目を選択</b>
+      <button type="button" id="picker-manage" class="linkbtn">種目を登録</button>
+    </div>
+    <div id="picker-body" class="picker-body"></div>
+  </div>
 
   <nav>
     <button data-tab="workout" class="active">

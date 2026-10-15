@@ -166,6 +166,21 @@ h3.sub { margin-top: 14px; }
 .chipbtns button.on { background: var(--black); border-color: var(--black); color: #fff; }
 .chipbtns button.on small { color: #c8c8c4; }
 .chipbtns button:active { opacity: .8; }
+
+/* ---- 種目の選択画面 ---- */
+button.primary { background: var(--black); color: #fff; border: 1px solid var(--black); font-weight: 700; }
+button.primary:active { opacity: .8; }
+.picker { position: fixed; inset: 0; z-index: 20; background: var(--hover); overflow-y: auto; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.picker-bar { position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: 48px 1fr auto; align-items: center; max-width: 560px; margin: 0 auto; padding: 6px 12px 6px 4px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.picker-bar button:first-child { width: 44px; padding: 0; font-size: 1.6rem; background: none; border: 0; color: var(--black); }
+.picker-bar b { text-align: center; color: var(--black); }
+.picker-body { max-width: 560px; margin: 0 auto; padding: 14px 16px 0; display: grid; gap: 14px; }
+.pgroup { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.pgroup h4 { margin: 0; padding: 8px 14px; background: var(--black); color: #fff; font-size: .9rem; }
+.pgroup h4 small { font-weight: 400; color: #c8c8c4; }
+.pgroup button.pick { display: block; width: 100%; text-align: left; padding: 12px 14px; background: var(--bg); color: var(--black); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.pgroup button.pick:active { background: var(--hover); }
+.pgroup button.more { display: block; width: 100%; text-align: right; padding: 10px 14px; background: var(--bg); color: var(--muted); border: 0; font-size: .85rem; border-radius: 0; }
 </style>
 </head>
 <body>
@@ -188,8 +203,10 @@ h3.sub { margin-top: 14px; }
         <canvas id="week-chart" class="chart short"></canvas>
       </div>
 
-      <div class="panel">
-        <h3>種目を追加</h3>
+      <button type="button" id="add-training" class="primary block">＋ 今日のトレーニング追加</button>
+
+      <div class="panel" id="workout-panel" hidden>
+        <h3>種目を追加 <small id="w-title"></small></h3>
         <form id="workout-form" class="grid2">
           <label class="f">部位<select id="w-part"></select></label>
           <label class="f">種目<input id="w-exercise" list="exercise-list" placeholder="例: ベンチプレス" required></label>
@@ -441,11 +458,21 @@ h3.sub { margin-top: 14px; }
         <h3>データ</h3>
         <button id="export" class="secondary block">JSONで書き出し</button>
         <label class="file block">JSONを読み込み<input type="file" id="import" accept="application/json" hidden></label>
+        <button id="restore" class="secondary block" hidden>消えたデータを復元する</button>
         <button id="load-demo" class="secondary block">デモデータを読み込む</button>
         <p id="data-notice" class="hint" role="status"></p>
       </div>
     </section>
   </main>
+
+  <div id="picker" class="picker" hidden role="dialog" aria-label="種目を選択">
+    <div class="picker-bar">
+      <button type="button" id="picker-back" aria-label="戻る">‹</button>
+      <b>種目を選択</b>
+      <button type="button" id="picker-manage" class="linkbtn">種目を登録</button>
+    </div>
+    <div id="picker-body" class="picker-body"></div>
+  </div>
 
   <nav>
     <button data-tab="workout" class="active">
@@ -531,17 +558,48 @@ const KEY = "kintore-app-v1";
 
 const emptyDb = () => ({ workouts: [], meals: [], body: [], goal: {}, profile: {}, customExercises: [], customFoods: [], customMealTypes: [] });
 
+const BACKUP_KEY = KEY + "-backup"; // 直前の保存内容(1世代)
+const SAFE_KEY = KEY + "-before-replace"; // デモ読込・インポートで置き換える直前の退避
+
 const Store = {
   load() {
+    let raw = null;
+    try { raw = localStorage.getItem(KEY); } catch { return emptyDb(); }
+    if (!raw) return emptyDb();
     try {
-      return Object.assign(emptyDb(), JSON.parse(localStorage.getItem(KEY)));
+      return Object.assign(emptyDb(), JSON.parse(raw));
     } catch {
+      // 壊れていても消さない。退避してから空で始める(上書きで失われるのを防ぐ)
+      try { localStorage.setItem(KEY + "-corrupt", raw); } catch {}
       return emptyDb();
     }
   },
   save(db) {
-    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} // 保存できない環境でも画面は動かす
+    try {
+      const next = JSON.stringify(db);
+      const prev = localStorage.getItem(KEY);
+      if (prev && prev !== next) localStorage.setItem(BACKUP_KEY, prev);
+      localStorage.setItem(KEY, next);
+    } catch {} // 保存できない環境でも画面は動かす
   },
+  // 全置換の前に現在のデータを退避する
+  snapshot() {
+    try { const cur = localStorage.getItem(KEY); if (cur) localStorage.setItem(SAFE_KEY, cur); } catch {}
+  },
+  // 退避・バックアップ・破損データのうち最も新しい復元元を返す(なければ null)
+  recoverable() {
+    try {
+      for (const k of [SAFE_KEY, BACKUP_KEY, KEY + "-corrupt"]) {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        const d = JSON.parse(raw);
+        if (d && (d.workouts || []).length + (d.meals || []).length + (d.body || []).length) return Object.assign(emptyDb(), d);
+      }
+    } catch {}
+    return null;
+  },
+  // ブラウザによる自動削除を避けるため永続化を要求する
+  persistent() { try { return navigator.storage && navigator.storage.persist ? navigator.storage.persist() : Promise.resolve(false); } catch { return Promise.resolve(false); } },
   newId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   },
@@ -1543,6 +1601,49 @@ function fillExerciseList() {
 $("w-part").addEventListener("change", fillExerciseList);
 fillExerciseList();
 
+// ---- 種目を選択して追加 ----
+function showWorkoutForm(part, exercise) {
+  $("w-part").value = part;
+  fillExerciseList();
+  $("w-exercise").value = exercise || "";
+  $("w-title").textContent = exercise || "";
+  $("workout-panel").hidden = false;
+  updateRmPreview();
+  $("workout-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+  if (exercise) $("w-weight").focus({ preventScroll: true });
+}
+const agoLabel = (part) => {
+  const last = db.workouts.filter((w) => w.part === part).reduce((m, w) => (w.date > m ? w.date : m), "");
+  if (!last) return "";
+  const n = Math.round((parseDate(curDate()) - parseDate(last)) / 86400000);
+  return n === 0 ? "今日" : n > 0 ? `${n}日前` : "";
+};
+const pickerOpen = new Set(); // 「すべて表示」にした部位
+function renderPicker() {
+  const cat = catalog();
+  $("picker-body").innerHTML = Object.keys(cat).map((p) => {
+    const list = cat[p], all = pickerOpen.has(p), shown = all ? list : list.slice(0, 3), ago = agoLabel(p);
+    return `<div class="pgroup"><h4>${esc(p)}${ago ? ` <small>- ${ago}</small>` : ""}</h4>` +
+      (shown.length ? shown.map((e) => `<button type="button" class="pick" data-part="${esc(p)}" data-ex="${esc(e)}">${esc(e)}</button>`).join("") : `<p class="hint" style="padding:0 14px">種目がありません(右上の「種目を登録」から追加)</p>`) +
+      (list.length > 3 ? `<button type="button" class="more" data-part="${esc(p)}">${all ? "閉じる" : "すべて表示"}</button>` : "") + `</div>`;
+  }).join("");
+}
+function openPicker() { renderPicker(); $("picker").hidden = false; $("picker").scrollTop = 0; }
+const closePicker = () => { $("picker").hidden = true; };
+$("add-training").addEventListener("click", openPicker);
+$("picker-back").addEventListener("click", closePicker);
+$("picker-manage").addEventListener("click", () => {
+  closePicker();
+  const m = document.querySelector("details.manage"); m.open = true;
+  m.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("picker-body").addEventListener("click", (e) => {
+  const more = e.target.closest(".more");
+  if (more) { const p = more.dataset.part; pickerOpen.has(p) ? pickerOpen.delete(p) : pickerOpen.add(p); renderPicker(); return; }
+  const b = e.target.closest(".pick");
+  if (b) { closePicker(); showWorkoutForm(b.dataset.part, b.dataset.ex); }
+});
+
 $("ex-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const name = $("ex-name").value.trim(), part = $("ex-part").value;
@@ -1561,14 +1662,11 @@ document.addEventListener("click", (e) => {
       .concat({ date: curDate(), exercise: b.dataset.ex, weight: +b.dataset.w, reps: +b.dataset.r }).slice(-120);
     Store.save(db);
   }
-  $("w-part").value = b.dataset.part;
-  fillExerciseList();
-  $("w-exercise").value = b.dataset.ex;
+  showWorkoutForm(b.dataset.part, b.dataset.ex);
   $("w-weight").value = b.dataset.w || "";
   $("w-reps").value = b.dataset.r || "";
   $("w-sets").value = b.dataset.s || 1;
   updateRmPreview();
-  $("workout-form").scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
 // 自分で登録した食品・サプリ(先頭に並べる)とプリセット
@@ -1775,6 +1873,7 @@ $("workout-form").addEventListener("submit", (e) => {
     weight: +$("w-weight").value, reps: +$("w-reps").value, sets: +$("w-sets").value,
   });
   $("w-exercise").value = "";
+  $("workout-panel").hidden = true;
   updateRmPreview();
   persist();
 });
@@ -1914,6 +2013,7 @@ $("import").addEventListener("change", async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.workouts) || !Array.isArray(data.meals)) throw new Error();
+    Store.snapshot();
     db = Object.assign(emptyDb(), data);
     persist();
   } catch {
@@ -1933,9 +2033,28 @@ $("load-demo").addEventListener("click", () => {
   }
   demoArmed = false;
   $("load-demo").textContent = "デモデータを読み込む";
+  Store.snapshot();
   db = buildDemoData();
   persist();
+  showRestore();
 });
+
+// 直前のデータの復元(デモ読込・インポート・破損で消えた場合)
+function showRestore() {
+  const r = Store.recoverable();
+  const b = $("restore");
+  if (b) b.hidden = !r || (db.workouts.length + db.meals.length + db.body.length > 0 && r.workouts.length + r.meals.length <= db.workouts.length + db.meals.length);
+}
+$("restore").addEventListener("click", () => {
+  const r = Store.recoverable();
+  if (!r) return;
+  db = r;
+  persist();
+  showRestore();
+  $("data-notice").textContent = "以前のデータを復元しました";
+});
+Store.persistent();
+showRestore();
 
 // ---- 画像保存 ----
 $("save-image").addEventListener("click", () => {

@@ -44,6 +44,49 @@ function fillExerciseList() {
 $("w-part").addEventListener("change", fillExerciseList);
 fillExerciseList();
 
+// ---- 種目を選択して追加 ----
+function showWorkoutForm(part, exercise) {
+  $("w-part").value = part;
+  fillExerciseList();
+  $("w-exercise").value = exercise || "";
+  $("w-title").textContent = exercise || "";
+  $("workout-panel").hidden = false;
+  updateRmPreview();
+  $("workout-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+  if (exercise) $("w-weight").focus({ preventScroll: true });
+}
+const agoLabel = (part) => {
+  const last = db.workouts.filter((w) => w.part === part).reduce((m, w) => (w.date > m ? w.date : m), "");
+  if (!last) return "";
+  const n = Math.round((parseDate(curDate()) - parseDate(last)) / 86400000);
+  return n === 0 ? "今日" : n > 0 ? `${n}日前` : "";
+};
+const pickerOpen = new Set(); // 「すべて表示」にした部位
+function renderPicker() {
+  const cat = catalog();
+  $("picker-body").innerHTML = Object.keys(cat).map((p) => {
+    const list = cat[p], all = pickerOpen.has(p), shown = all ? list : list.slice(0, 3), ago = agoLabel(p);
+    return `<div class="pgroup"><h4>${esc(p)}${ago ? ` <small>- ${ago}</small>` : ""}</h4>` +
+      (shown.length ? shown.map((e) => `<button type="button" class="pick" data-part="${esc(p)}" data-ex="${esc(e)}">${esc(e)}</button>`).join("") : `<p class="hint" style="padding:0 14px">種目がありません(右上の「種目を登録」から追加)</p>`) +
+      (list.length > 3 ? `<button type="button" class="more" data-part="${esc(p)}">${all ? "閉じる" : "すべて表示"}</button>` : "") + `</div>`;
+  }).join("");
+}
+function openPicker() { renderPicker(); $("picker").hidden = false; $("picker").scrollTop = 0; }
+const closePicker = () => { $("picker").hidden = true; };
+$("add-training").addEventListener("click", openPicker);
+$("picker-back").addEventListener("click", closePicker);
+$("picker-manage").addEventListener("click", () => {
+  closePicker();
+  const m = document.querySelector("details.manage"); m.open = true;
+  m.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("picker-body").addEventListener("click", (e) => {
+  const more = e.target.closest(".more");
+  if (more) { const p = more.dataset.part; pickerOpen.has(p) ? pickerOpen.delete(p) : pickerOpen.add(p); renderPicker(); return; }
+  const b = e.target.closest(".pick");
+  if (b) { closePicker(); showWorkoutForm(b.dataset.part, b.dataset.ex); }
+});
+
 $("ex-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const name = $("ex-name").value.trim(), part = $("ex-part").value;
@@ -62,14 +105,11 @@ document.addEventListener("click", (e) => {
       .concat({ date: curDate(), exercise: b.dataset.ex, weight: +b.dataset.w, reps: +b.dataset.r }).slice(-120);
     Store.save(db);
   }
-  $("w-part").value = b.dataset.part;
-  fillExerciseList();
-  $("w-exercise").value = b.dataset.ex;
+  showWorkoutForm(b.dataset.part, b.dataset.ex);
   $("w-weight").value = b.dataset.w || "";
   $("w-reps").value = b.dataset.r || "";
   $("w-sets").value = b.dataset.s || 1;
   updateRmPreview();
-  $("workout-form").scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
 // 自分で登録した食品・サプリ(先頭に並べる)とプリセット
@@ -276,6 +316,7 @@ $("workout-form").addEventListener("submit", (e) => {
     weight: +$("w-weight").value, reps: +$("w-reps").value, sets: +$("w-sets").value,
   });
   $("w-exercise").value = "";
+  $("workout-panel").hidden = true;
   updateRmPreview();
   persist();
 });
@@ -406,8 +447,34 @@ $("ai-key").value = FoodAI.getKey();
 $("ai-model").value = FoodAI.getModel();
 
 // ---- データ入出力 ----
-$("export").addEventListener("click", () => {
-  saveFile(new Blob([JSON.stringify(db, null, 2)], { type: "application/json" }), `kintore-${today()}.json`);
+// 最後に書き出した日時を覚えて、間が空いたら知らせる
+const EXPORT_KEY = "kintore-last-export";
+function showExportStatus() {
+  let t = 0;
+  try { t = Number(localStorage.getItem(EXPORT_KEY)) || 0; } catch {}
+  const days = t ? Math.floor((Date.now() - t) / 86400000) : null;
+  const el = $("export-status");
+  if (!el) return;
+  const has = db.workouts.length + db.meals.length + db.body.length > 0;
+  el.textContent = days === null ? (has ? "まだバックアップしていません。書き出して保存してください" : "")
+    : days >= 7 ? `最後の書き出しから${days}日経っています。バックアップしてください`
+    : `最後の書き出し: ${days === 0 ? "今日" : days + "日前"}`;
+  el.classList.toggle("warn", has && (days === null || days >= 7));
+}
+$("export").addEventListener("click", async () => {
+  const name = `kintore-${today()}.json`;
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+  const file = new File([blob], name, { type: "application/json" });
+  try {
+    // 共有シート(ファイルApp・iCloud Drive・Google Driveなどへ保存できる)
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: name });
+    else await saveFile(blob, name);
+  } catch (e) {
+    if (e && e.name === "AbortError") return; // 共有をキャンセルした場合は記録しない
+    await saveFile(blob, name);
+  }
+  try { localStorage.setItem(EXPORT_KEY, String(Date.now())); } catch {}
+  showExportStatus();
 });
 $("import").addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -457,6 +524,7 @@ $("restore").addEventListener("click", () => {
 });
 Store.persistent();
 showRestore();
+showExportStatus();
 
 // ---- 画像保存 ----
 $("save-image").addEventListener("click", () => {
